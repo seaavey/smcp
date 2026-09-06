@@ -16,6 +16,12 @@ pub struct BitwardenService {
 }
 
 #[derive(Deserialize, JsonSchema)]
+pub struct SetMasterPasswordParam {
+    #[schemars(description = "Bitwarden Master Password to store and unlock vault with")]
+    pub master_password: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
 pub struct SearchParam {
     #[schemars(description = "Keyword to filter vault items by name")]
     pub query: Option<String>,
@@ -70,7 +76,7 @@ impl BitwardenService {
             }
         }
 
-        Err("Bitwarden master password not found. Please set BW_PASSWORD or BITWARDEN_MASTER_PASSWORD environment variable or create ~/.config/credentials/bitwarden_master_password.".into())
+        Err("Bitwarden master password not configured. Please use tool `bitwarden_set_password` or run `smcp setup bitwarden`.".into())
     }
 
     fn get_or_unlock_session(&self) -> Result<String, String> {
@@ -79,7 +85,6 @@ impl BitwardenService {
             return Ok(s.clone());
         }
 
-        // If user already passed BW_SESSION in environment, reuse it
         if let Ok(session) = env::var("BW_SESSION") {
             if !session.trim().is_empty() {
                 *lock = Some(session.trim().to_string());
@@ -126,6 +131,70 @@ impl BitwardenService {
 
 #[tool(tool_box)]
 impl BitwardenService {
+    #[tool(
+        name = "bitwarden_set_password",
+        description = "Set and save Bitwarden Master Password directly via MCP, testing unlock immediately"
+    )]
+    pub async fn set_password(&self, #[tool(aggr)] param: SetMasterPasswordParam) -> String {
+        let pwd = param.master_password.trim().to_string();
+        if pwd.is_empty() {
+            return serde_json::json!({
+                "status": "error",
+                "message": "Master password cannot be empty."
+            }).to_string();
+        }
+
+        // Test unlock immediately
+        let output = match Command::new("bw").args(["unlock", &pwd, "--raw"]).output() {
+            Ok(o) => o,
+            Err(e) => return serde_json::json!({
+                "status": "error",
+                "message": format!("Failed to execute bw CLI: {e}")
+            }).to_string(),
+        };
+
+        if !output.status.success() {
+            let err = String::from_utf8_lossy(&output.stderr);
+            return serde_json::json!({
+                "status": "error",
+                "message": format!("Bitwarden unlock verification failed: {err}")
+            }).to_string();
+        }
+
+        let new_session = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if let Ok(mut lock) = self.session.lock() {
+            *lock = Some(new_session);
+        }
+
+        let base = if let Ok(home) = env::var("HOME") {
+            PathBuf::from(home)
+        } else {
+            PathBuf::from(".")
+        };
+        let creds_dir = base.join(".config").join("credentials");
+        if let Err(e) = fs::create_dir_all(&creds_dir) {
+            return serde_json::json!({
+                "status": "error",
+                "message": format!("Failed to create credentials directory: {e}")
+            }).to_string();
+        }
+
+        let creds_file = creds_dir.join("bitwarden_master_password");
+        let content = format!("BITWARDEN_MASTER_PASSWORD={pwd}\n");
+        if let Err(e) = fs::write(&creds_file, content) {
+            return serde_json::json!({
+                "status": "error",
+                "message": format!("Failed to write credentials file: {e}")
+            }).to_string();
+        }
+
+        serde_json::json!({
+            "status": "success",
+            "message": "Bitwarden master password verified, session unlocked, and saved!",
+            "path": creds_file.display().to_string()
+        }).to_string()
+    }
+
     #[tool(name = "bitwarden_status", description = "Check Bitwarden status and sync status")]
     pub async fn status(&self) -> String {
         match self.run_bw(&["status"]) {

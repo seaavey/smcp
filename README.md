@@ -5,16 +5,22 @@ A modular, high-performance Model Context Protocol (MCP) server suite built in R
 ## Architecture & Design Goals
 
 - **Modular Domain Hierarchy:** Subdivided into logical domain modules (`src/servers/bitwarden`, `src/servers/workspace/gmail`).
-- **Interactive Setup Wizards:** Includes `smcp setup <gmail|bitwarden>` to easily set and verify credentials with instant connectivity tests.
-- **Zero Hardcoding:** Works out-of-the-box for any user via standard environment variables or standard config paths. Display names and identity are dynamically discovered directly from the server.
+- **Autonomous & In-Band MCP Setup:** Credentials can be configured **interactively via CLI** (`smcp setup ...`) OR **directly through MCP tool calls** (`gmail_set_credentials`, `bitwarden_set_password`) by an AI agent mid-conversation.
+- **Zero Hardcoding:** Works out-of-the-box for any user via standard environment variables, MCP tools, or standard config paths. Display names and identity are dynamically discovered directly from the server.
 - **Zero Interpreter Overhead:** Native Rust executable using Tokio and official MCP SDK (`rmcp`), minimizing memory footprint and process spawn latency.
 
 ---
 
-## Interactive Credential Setup
+## Credential Setup Options
 
-SMCP includes built-in setup wizards that prompt for credentials, store them securely in `~/.config/credentials/`, and instantly test authentication.
+Users/agents can configure credentials through two paths:
 
+### Option A: Direct In-Band MCP Tools (Zero Human CLI needed)
+AI agents (like Hermes or Claude) can set up and verify credentials autonomously when prompted:
+- `gmail_set_credentials(email, app_password)`: Verifies IMAP login against `imap.gmail.com:993` with TLS and saves credentials.
+- `bitwarden_set_password(master_password)`: Verifies `bw unlock --raw` immediately and saves master password.
+
+### Option B: Interactive CLI Wizard
 ```bash
 # Setup & test Gmail credentials (App Password)
 smcp setup gmail
@@ -31,13 +37,9 @@ smcp setup bitwarden
 
 Integrates with the local Bitwarden CLI (`bw`) through stdio transport. Transparently manages session unlocking and caching.
 
-#### Configuration
-- Interactive: `smcp setup bitwarden`
-- Or Environment: `BW_PASSWORD` or `BITWARDEN_MASTER_PASSWORD`
-- Or Config File: `~/.config/credentials/bitwarden_master_password`
-
 #### Registered Tools
 
+- `bitwarden_set_password`: Set and save Bitwarden Master Password directly via MCP, testing unlock immediately.
 - `bitwarden_status`: Check Bitwarden vault status, user email, and last sync timestamp.
 - `bitwarden_sync`: Sync local vault cache with remote Bitwarden servers.
 - `bitwarden_list_items`: Retrieve sanitized list of vault items (ID, Name, Type, Username). Optional search query filter.
@@ -56,16 +58,17 @@ Direct IMAP (TLS) and SMTP (TLS) client built in native Rust without external Py
    https://myaccount.google.com/signinoptions/two-step-verification
 2. Generate a 16-character **App Password** for 'Mail':
    https://myaccount.google.com/apppasswords
-3. Run the setup wizard:
-   ```bash
-   smcp setup gmail
-   ```
-   *(Or set `GMAIL_EMAIL` and `GMAIL_APP_PASSWORD` environment variables / file).*
+3. Set credentials via MCP tool `gmail_set_credentials` or CLI `smcp setup gmail`.
 
 Sender display names are automatically detected from the authenticated user's sent mailbox on the IMAP server.
 
 #### Registered Tools
 
+- `gmail_set_credentials`
+  - Description: Set and save Gmail credentials (email and App Password) directly via MCP, testing the connection immediately.
+  - Parameters:
+    - `email` *(required, string)*
+    - `app_password` *(required, string)*
 - `gmail_check_emails`
   - Description: Check recent INBOX emails (returns numeric sequence ID, Date, Sender, and Subject).
   - Parameters:
