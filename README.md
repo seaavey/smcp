@@ -4,7 +4,8 @@ A modular, high-performance Model Context Protocol (MCP) server suite built in R
 
 ## Architecture & Design Goals
 
-- **Single Binary Multiplexer:** Unified CLI entry point running distinct MCP servers via subcommands (`smcp <subcommand>`).
+- **Modular Domain Hierarchy:** Subdivided into logical domain modules (`src/servers/bitwarden`, `src/servers/workspace/gmail`).
+- **Single Binary Multiplexer:** Unified CLI entry point running distinct MCP servers via subcommands (`smcp <domain> <server>`).
 - **Zero Interpreter Overhead:** Native Rust executable using Tokio and official MCP SDK (`rmcp`), minimizing memory footprint and process spawn latency.
 - **Agent Self-Sufficient:** Native credential resolution and automated session lifecycle handling without manual terminal intervention.
 
@@ -12,7 +13,7 @@ A modular, high-performance Model Context Protocol (MCP) server suite built in R
 
 ## Included MCP Servers
 
-### 1. Bitwarden (`smcp bitwarden`)
+### 1. Bitwarden (`smcp bitwarden serve`)
 
 Integrates with the local Bitwarden CLI (`bw`) through stdio transport. It transparently manages vault unlock state, caching session keys in memory while resolving credentials automatically from secure configuration files.
 
@@ -20,31 +21,61 @@ Integrates with the local Bitwarden CLI (`bw`) through stdio transport. It trans
 
 - `bitwarden_status`
   - Description: Check Bitwarden vault status, user email, and last sync timestamp.
-  - Parameters: None
-
 - `bitwarden_sync`
   - Description: Sync local vault cache with remote Bitwarden servers.
-  - Parameters: None
-
 - `bitwarden_list_items`
-  - Description: Retrieve sanitized list of vault items (ID, Name, Type, Username).
-  - Parameters:
-    - `query` *(optional, string)*: Filter items by search keyword.
-
+  - Description: Retrieve sanitized list of vault items (ID, Name, Type, Username). Optional search query filter.
 - `bitwarden_get_item`
-  - Description: Get complete JSON metadata for a specific vault item.
-  - Parameters:
-    - `id_or_name` *(required, string)*: Item ID or exact item name.
-
+  - Description: Get complete JSON metadata for a specific vault item by name or ID.
 - `bitwarden_get_password`
   - Description: Directly retrieve item password without parsing raw payload.
-  - Parameters:
-    - `id_or_name` *(required, string)*: Item ID or exact item name.
-
 - `bitwarden_get_totp`
   - Description: Generate live 2FA TOTP code for a designated vault item.
+
+---
+
+### 2. Google Workspace (`smcp workspace gmail`)
+
+Direct IMAP (TLS) and SMTP (TLS) client built in native Rust without Python wrappers or web browser automation.
+
+#### Registered Tools
+
+- `gmail_check_emails`
+  - Description: Check recent INBOX emails (returns numeric sequence ID, Date, Sender, and Subject).
   - Parameters:
-    - `id_or_name` *(required, string)*: Item ID or exact item name.
+    - `limit` *(optional, uint, default: 10, max: 30)*
+    - `filter` *(optional, string)*: `'unread'` (default) or `'all'`
+- `gmail_read_email`
+  - Description: Read full parsed body and headers of an email by sequence ID.
+  - Parameters:
+    - `id` *(required, uint)*: Sequence ID from `gmail_check_emails`
+- `gmail_send_email`
+  - Description: Send text emails via Gmail SMTP relay (`smtp.gmail.com:587`).
+  - Parameters:
+    - `to` *(required, string)*: Recipient email
+    - `subject` *(required, string)*: Subject line
+    - `body` *(required, string)*: Email body
+    - `from_name` *(optional, string)*: Display sender name (default: "Muhammad Adriansyah")
+
+---
+
+## Project Structure
+
+```
+SMCP/
+├── Cargo.toml
+├── LICENSE
+├── README.md
+└── src/
+    ├── main.rs
+    └── servers/
+        ├── mod.rs
+        ├── bitwarden/
+        │   └── mod.rs
+        └── workspace/
+            ├── mod.rs
+            └── gmail.rs
+```
 
 ---
 
@@ -53,7 +84,8 @@ Integrates with the local Bitwarden CLI (`bw`) through stdio transport. It trans
 ### Prerequisites
 
 - Rust 1.80+ (`cargo`, `rustc`)
-- Bitwarden CLI (`npm install -g @bitwarden/cli` or binary install)
+- OpenSSL development libraries (`libssl-dev`)
+- Bitwarden CLI (`npm install -g @bitwarden/cli`)
 
 ### Build Release Binary
 
@@ -79,7 +111,11 @@ smcp --help
 Register using the Hermes MCP command:
 
 ```bash
-hermes mcp add bitwarden --command smcp --args bitwarden
+# Bitwarden
+hermes mcp add bitwarden --command smcp --args bitwarden serve
+
+# Google Workspace / Gmail
+hermes mcp add gmail --command smcp --args workspace gmail
 ```
 
 Or add directly to `~/.hermes/config.yaml`:
@@ -88,28 +124,17 @@ Or add directly to `~/.hermes/config.yaml`:
 mcp_servers:
   bitwarden:
     command: "smcp"
-    args: ["bitwarden"]
+    args: ["bitwarden", "serve"]
+  gmail:
+    command: "smcp"
+    args: ["workspace", "gmail"]
 ```
 
-Test connection:
+Test connections:
 
 ```bash
 hermes mcp test bitwarden
-```
-
-### Claude Desktop / Cursor
-
-Add to your `claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "bitwarden": {
-      "command": "smcp",
-      "args": ["bitwarden"]
-    }
-  }
-}
+hermes mcp test gmail
 ```
 
 ---
