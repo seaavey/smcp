@@ -5,25 +5,69 @@ A modular, high-performance Model Context Protocol (MCP) server suite built in R
 ## Architecture & Design Goals
 
 - **Modular Domain Hierarchy:** Subdivided into logical domain modules (`src/servers/bitwarden`, `src/servers/workspace/gmail`).
-- **Single Binary Multiplexer:** Unified CLI entry point running distinct MCP servers via subcommands (`smcp <domain> <server>`).
-- **Zero Hardcoding:** Works out-of-the-box for any user via standard environment variables or standard config paths. Display names and identity are dynamically discovered directly from the server.
-- **Zero Interpreter Overhead:** Native Rust executable using Tokio and official MCP SDK (`rmcp`), minimizing memory footprint and process spawn latency.
+- **Autonomous & In-Band MCP Setup:** Credentials can be configured **interactively via CLI** (`smcp setup ...`) OR **directly through MCP tool calls** (`gmail_set_credentials`, `bitwarden_set_password`) by an AI agent mid-conversation with pre-save TLS/unlock verification.
+- **Permanent UID Email Model:** Gmail uses permanent IMAP UIDs (Unique Identifiers) rather than ephemeral sequence numbers, ensuring robust actions and threading.
+- **Full Email Lifecycle:** Read, search, send (HTML/text), auto-threaded reply (`In-Reply-To`/`References`), attachment metadata, and email management (`trash`, `star`, `mark_read`).
+- **Bitwarden Vault Mutation:** Create login credentials and generate secure random passwords directly from the suite.
+- **Direct CLI Subcommand Runner:** Test and use any capability directly via `smcp call ...` without starting an MCP server daemon or using Python.
+
+---
+
+## Direct CLI Usage (`smcp call`)
+
+```bash
+# Check emails across mailboxes (inbox, spam, trash, sent, drafts, all, starred)
+smcp call gmail-check --folder spam --filter all --limit 5
+smcp call gmail-check --folder inbox --filter all --query Bitwarden
+smcp call gmail-check --limit 10 --filter unread
+
+# Read an email by permanent UID (with attachments & header metadata)
+smcp call gmail-read 5301 --folder inbox
+
+# Reply to an email (automatically tracks subject and In-Reply-To thread)
+smcp call gmail-reply 5301 --body "Thank you, verified!"
+
+# Manage emails (trash, mark_read, mark_unread, star, unstar)
+smcp call gmail-manage 5301 trash
+
+# Send an email (plain text or HTML)
+smcp call gmail-send --to someone@example.com --subject "Subject" --body "<h1>Hello</h1>" --is-html
+
+# Bitwarden items & passwords
+smcp call bw-list --query crowdgen
+smcp call bw-password CrowdGen
+smcp call bw-totp CrowdGen
+smcp call bw-generate --length 24
+```
 
 ---
 
 ## Included MCP Servers
 
-### 1. Bitwarden (`smcp bitwarden serve`)
+### 1. Google Workspace (`smcp workspace gmail`)
 
-Integrates with the local Bitwarden CLI (`bw`) through stdio transport. Transparently manages session unlocking and caching.
-
-#### Configuration (Dynamic Resolution)
-Resolves master password in order:
-1. Environment: `BW_PASSWORD` or `BITWARDEN_MASTER_PASSWORD`
-2. Config files: `~/.config/credentials/bitwarden_master_password` or `~/.config/credentials/bitwarden_credentials`
+Native Rust IMAP/SMTP client supporting full mailbox traversal (`INBOX`, `[Gmail]/Spam`, `[Gmail]/Trash`, `[Gmail]/Sent Mail`, `[Gmail]/Drafts`, `[Gmail]/Starred`, `[Gmail]/Important`).
 
 #### Registered Tools
 
+- `gmail_set_credentials`: Set and save Gmail credentials directly via MCP, testing the TLS connection immediately before saving.
+- `gmail_check_emails`: Check recent emails with permanent `uid`, filter (`unread`, `all`, `read`, `starred`), folder, and search query.
+- `gmail_read_email`: Read complete content, attachment metadata (`filename`, `content_type`, `size`), sender/receiver headers, and body by `uid`.
+- `gmail_reply_email`: Reply to an existing email thread using `uid` (automatically extracts sender, injects `In-Reply-To`, `References`, and `Re:` subject).
+- `gmail_manage_email`: Execute inbox triage actions (`mark_read`, `mark_unread`, `star`, `unstar`, `trash`) by `uid`.
+- `gmail_send_email`: Send emails via Gmail SMTP relay (supports plain text or HTML formatting).
+
+---
+
+### 2. Bitwarden (`smcp bitwarden serve`)
+
+Integrates with the local Bitwarden CLI (`bw`) through stdio transport. Transparently manages session unlocking, caching, and item creation.
+
+#### Registered Tools
+
+- `bitwarden_set_password`: Set and save Bitwarden Master Password directly via MCP, testing unlock immediately.
+- `bitwarden_generate_password`: Generate cryptographically secure passwords via Bitwarden CLI options (`length`, `special`, `numbers`, `uppercase`, `lowercase`).
+- `bitwarden_create_login_item`: Create and store new login credentials into the vault (`name`, `username`, `password`, `uri`, `notes`).
 - `bitwarden_status`: Check Bitwarden vault status, user email, and last sync timestamp.
 - `bitwarden_sync`: Sync local vault cache with remote Bitwarden servers.
 - `bitwarden_list_items`: Retrieve sanitized list of vault items (ID, Name, Type, Username). Optional search query filter.
@@ -33,48 +77,21 @@ Resolves master password in order:
 
 ---
 
-### 2. Google Workspace (`smcp workspace gmail`)
+## Credential Setup
 
-Direct IMAP (TLS) and SMTP (TLS) client built in native Rust without external Python or browser dependencies.
+### Option A: Direct In-Band MCP Tools (Zero Terminal needed)
+- `gmail_set_credentials(email, app_password)`
+- `bitwarden_set_password(master_password)`
 
-#### Configuration (Dynamic Resolution)
-1. Email & App Password resolved from:
-   - Environment: `GMAIL_EMAIL` and `GMAIL_APP_PASSWORD`
-   - Files: `~/.config/credentials/gmail_credentials` or `~/.config/credentials/gmail_app_password`
-2. Sender display name:
-   - Automatically detected from the authenticated user's sent mailbox on the IMAP server.
-   - Can be overridden via tool argument (`from_name`) if desired.
-
-#### Registered Tools
-
-- `gmail_check_emails`
-  - Description: Check recent INBOX emails (returns numeric sequence ID, Date, Sender, and Subject).
-  - Parameters:
-    - `limit` *(optional, uint, default: 10, max: 30)*
-    - `filter` *(optional, string)*: `'unread'` (default) or `'all'`
-- `gmail_read_email`
-  - Description: Read full parsed body and headers of an email by sequence ID.
-  - Parameters:
-    - `id` *(required, uint)*: Sequence ID from `gmail_check_emails`
-- `gmail_send_email`
-  - Description: Send text emails via Gmail SMTP relay (`smtp.gmail.com:587`).
-  - Parameters:
-    - `to` *(required, string)*: Recipient email
-    - `subject` *(required, string)*: Subject line
-    - `body` *(required, string)*: Email body
-    - `from_name` *(optional, string)*: Custom sender display name (defaults to auto-detected server name)
+### Option B: Interactive CLI Wizard
+```bash
+smcp setup gmail
+smcp setup bitwarden
+```
 
 ---
 
 ## Installation & Build
-
-### Prerequisites
-
-- Rust 1.80+ (`cargo`, `rustc`)
-- OpenSSL development libraries (`libssl-dev`)
-- Bitwarden CLI (`npm install -g @bitwarden/cli`)
-
-### Build Release Binary
 
 ```bash
 git clone https://github.com/seaavey/smcp.git
@@ -83,45 +100,30 @@ cargo build --release
 sudo cp target/release/smcp /usr/local/bin/smcp
 ```
 
-Verify the installation:
-
-```bash
-smcp --help
-```
-
 ---
 
 ## Agent Integration
 
 ### Hermes Agent
-
-Register using the Hermes MCP command:
-
 ```bash
-# Bitwarden
 hermes mcp add bitwarden --command smcp --args bitwarden serve
-
-# Google Workspace / Gmail
 hermes mcp add gmail --command smcp --args workspace gmail
 ```
 
-Or add directly to `~/.hermes/config.yaml`:
-
-```yaml
-mcp_servers:
-  bitwarden:
-    command: "smcp"
-    args: ["bitwarden", "serve"]
-  gmail:
-    command: "smcp"
-    args: ["workspace", "gmail"]
-```
-
-Test connections:
-
-```bash
-hermes mcp test bitwarden
-hermes mcp test gmail
+### Claude Desktop / Cursor
+```json
+{
+  "mcpServers": {
+    "bitwarden": {
+      "command": "smcp",
+      "args": ["bitwarden", "serve"]
+    },
+    "gmail": {
+      "command": "smcp",
+      "args": ["workspace", "gmail"]
+    }
+  }
+}
 ```
 
 ---
