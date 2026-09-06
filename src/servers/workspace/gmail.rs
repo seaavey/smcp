@@ -9,7 +9,9 @@ use rmcp::{
 };
 use schemars::JsonSchema;
 use serde::Deserialize;
+use std::env;
 use std::fs;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Default)]
 pub struct GmailService;
@@ -36,22 +38,69 @@ pub struct SendEmailParam {
     pub subject: String,
     #[schemars(description = "Email body text")]
     pub body: String,
-    #[schemars(description = "Optional sender display name (default: 'Muhammad Adriansyah')")]
+    #[schemars(description = "Optional custom sender display name")]
     pub from_name: Option<String>,
 }
 
 impl GmailService {
-    fn get_credentials() -> Result<(String, String), String> {
-        let email = "seaavey@gmail.com".to_string();
-        let pwd_path = "/root/.config/credentials/gmail_app_password";
-        let raw = fs::read_to_string(pwd_path)
-            .map_err(|e| format!("Failed to read gmail app password: {e}"))?;
-        let pass = raw.replace(' ', "").trim().to_string();
-        Ok((email, pass))
+    fn resolve_credentials() -> Result<(String, String), String> {
+        let mut email = env::var("GMAIL_EMAIL").unwrap_or_default().trim().to_string();
+        let mut app_password = env::var("GMAIL_APP_PASSWORD").unwrap_or_default().trim().to_string();
+
+        let mut candidate_paths = Vec::new();
+        if let Ok(home) = env::var("HOME") {
+            let h = PathBuf::from(home);
+            candidate_paths.push(h.join(".config/credentials/gmail_app_password"));
+            candidate_paths.push(h.join(".config/credentials/gmail_credentials"));
+            candidate_paths.push(h.join(".config/credentials/bitwarden_credentials"));
+        }
+
+        for path in candidate_paths {
+            if path.exists() {
+                if let Ok(content) = fs::read_to_string(&path) {
+                    for line in content.lines() {
+                        let trimmed = line.trim();
+                        if let Some(val) = trimmed.strip_prefix("GMAIL_EMAIL=") {
+                            if email.is_empty() {
+                                email = val.trim().to_string();
+                            }
+                        }
+                        if let Some(val) = trimmed.strip_prefix("BITWARDEN_EMAIL=") {
+                            if email.is_empty() {
+                                email = val.trim().to_string();
+                            }
+                        }
+                        if let Some(val) = trimmed.strip_prefix("GMAIL_APP_PASSWORD=") {
+                            if app_password.is_empty() {
+                                app_password = val.trim().to_string();
+                            }
+                        }
+                    }
+                    if app_password.is_empty() {
+                        let raw = content.trim();
+                        if !raw.contains('=') && !raw.is_empty() {
+                            app_password = raw.to_string();
+                        }
+                    }
+                }
+            }
+        }
+
+        let clean_password = app_password.replace(' ', "").trim().to_string();
+
+        if email.is_empty() {
+            return Err("Gmail email address not found. Please set GMAIL_EMAIL environment variable or define it in ~/.config/credentials/gmail_credentials.".into());
+        }
+
+        if clean_password.is_empty() {
+            return Err("Gmail app password not found. Please set GMAIL_APP_PASSWORD environment variable or in ~/.config/credentials/gmail_app_password.".into());
+        }
+
+        Ok((email, clean_password))
     }
 
     fn connect_imap_sync() -> Result<imap::Session<native_tls::TlsStream<std::net::TcpStream>>, String> {
-        let (email, pass) = Self::get_credentials()?;
+        let (email, pass) = Self::resolve_credentials()?;
         let tls = native_tls::TlsConnector::builder()
             .build()
             .map_err(|e| format!("TLS build failed: {e}"))?;
@@ -64,6 +113,40 @@ impl GmailService {
             .map_err(|(e, _)| format!("IMAP login failed: {e}"))?;
 
         Ok(session)
+    }
+
+    /// Dynamically discover the account's sender name directly from recently sent emails on the IMAP server
+    fn detect_sender_name(session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStream>>, my_email: &str) -> Option<String> {
+        let sent_folders = ["[Gmail]/Sent Mail", "[Gmail]/Sent", "Sent", "Sent Messages", "INBOX"];
+        for folder in sent_folders {
+            if session.select(folder).is_ok() {
+                if let Ok(seqs) = session.search(format!("FROM \"{my_email}\"")) {
+                    if let Some(&last_id) = seqs.iter().max() {
+                        if let Ok(msgs) = session.fetch(last_id.to_string(), "(BODY.PEEK[HEADER.FIELDS (FROM)])") {
+                            for m in &msgs {
+                                if let Some(hdr) = m.header() {
+                                    if let Ok((headers, _)) = mailparse::parse_headers(hdr) {
+                                        for h in headers {
+                                            if h.get_key().eq_ignore_ascii_case("from") {
+                                                let val = h.get_value();
+                                                // Extract name from "John Doe <john@gmail.com>" or John Doe
+                                                if let Some(idx) = val.find('<') {
+                                                    let name = val[..idx].trim().trim_matches('"').trim();
+                                                    if !name.is_empty() {
+                                                        return Some(name.to_string());
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        None
     }
 }
 
@@ -217,14 +300,32 @@ impl GmailService {
 
     #[tool(name = "gmail_send_email", description = "Send an email via Gmail SMTP")]
     pub async fn send_email(&self, #[tool(aggr)] param: SendEmailParam) -> String {
-        let (my_email, pass) = match Self::get_credentials() {
+        let (my_email, pass) = match Self::resolve_credentials() {
             Ok(c) => c,
             Err(e) => return format!("{{\"error\": \"{e}\"}}"),
         };
 
-        let from_header = match param.from_name {
-            Some(ref name) => format!("{name} <{my_email}>"),
-            None => format!("Muhammad Adriansyah <{my_email}>"),
+        // If from_name not explicitly provided, dynamically query IMAP server for sender's actual display name
+        let email_for_task = my_email.clone();
+        let detected_name = if param.from_name.is_none() {
+            tokio::task::spawn_blocking(move || {
+                if let Ok(mut session) = Self::connect_imap_sync() {
+                    let res = Self::detect_sender_name(&mut session, &email_for_task);
+                    let _ = session.logout();
+                    res
+                } else {
+                    None
+                }
+            })
+            .await
+            .unwrap_or(None)
+        } else {
+            None
+        };
+
+        let from_header = match param.from_name.or(detected_name) {
+            Some(name) => format!("{name} <{my_email}>"),
+            None => my_email.clone(),
         };
 
         let email = match Message::builder()
@@ -256,6 +357,7 @@ impl GmailService {
             Ok(_) => serde_json::json!({
                 "status": "success",
                 "message": format!("Email successfully sent to {}", param.to),
+                "from": from_header,
                 "subject": param.subject
             })
             .to_string(),

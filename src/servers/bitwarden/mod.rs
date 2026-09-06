@@ -4,7 +4,9 @@ use rmcp::{
 };
 use schemars::JsonSchema;
 use serde::Deserialize;
+use std::env;
 use std::fs;
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 
@@ -26,27 +28,66 @@ pub struct GetItemParam {
 }
 
 impl BitwardenService {
+    fn resolve_master_password() -> Result<String, String> {
+        // 1. Check environment variable
+        if let Ok(val) = env::var("BW_PASSWORD") {
+            if !val.trim().is_empty() {
+                return Ok(val.trim().to_string());
+            }
+        }
+        if let Ok(val) = env::var("BITWARDEN_MASTER_PASSWORD") {
+            if !val.trim().is_empty() {
+                return Ok(val.trim().to_string());
+            }
+        }
+
+        // 2. Check candidate credential file paths (~/.config/credentials/...)
+        let mut candidate_paths = Vec::new();
+        if let Ok(home) = env::var("HOME") {
+            let h = PathBuf::from(home);
+            candidate_paths.push(h.join(".config/credentials/bitwarden_master_password"));
+            candidate_paths.push(h.join(".config/credentials/bitwarden_credentials"));
+            candidate_paths.push(h.join(".config/bitwarden/credentials"));
+        }
+
+        for path in candidate_paths {
+            if path.exists() {
+                if let Ok(content) = fs::read_to_string(&path) {
+                    for line in content.lines() {
+                        let trimmed = line.trim();
+                        if let Some(val) = trimmed.strip_prefix("BITWARDEN_MASTER_PASSWORD=") {
+                            return Ok(val.trim().to_string());
+                        }
+                        if let Some(val) = trimmed.strip_prefix("BW_PASSWORD=") {
+                            return Ok(val.trim().to_string());
+                        }
+                    }
+                    let raw = content.trim();
+                    if !raw.is_empty() && !raw.contains('=') {
+                        return Ok(raw.to_string());
+                    }
+                }
+            }
+        }
+
+        Err("Bitwarden master password not found. Please set BW_PASSWORD or BITWARDEN_MASTER_PASSWORD environment variable or create ~/.config/credentials/bitwarden_master_password.".into())
+    }
+
     fn get_or_unlock_session(&self) -> Result<String, String> {
         let mut lock = self.session.lock().map_err(|e| e.to_string())?;
         if let Some(ref s) = *lock {
             return Ok(s.clone());
         }
 
-        let master_pwd_path = "/root/.config/credentials/bitwarden_master_password";
-        let content = fs::read_to_string(master_pwd_path)
-            .map_err(|e| format!("Failed to read master password file: {e}"))?;
-
-        let mut password = String::new();
-        for line in content.lines() {
-            let line = line.trim();
-            if let Some(val) = line.strip_prefix("BITWARDEN_MASTER_PASSWORD=") {
-                password = val.trim().to_string();
-                break;
+        // If user already passed BW_SESSION in environment, reuse it
+        if let Ok(session) = env::var("BW_SESSION") {
+            if !session.trim().is_empty() {
+                *lock = Some(session.trim().to_string());
+                return Ok(session.trim().to_string());
             }
         }
-        if password.is_empty() {
-            password = content.trim().to_string();
-        }
+
+        let password = Self::resolve_master_password()?;
 
         let output = Command::new("bw")
             .args(["unlock", &password, "--raw"])

@@ -6,8 +6,8 @@ A modular, high-performance Model Context Protocol (MCP) server suite built in R
 
 - **Modular Domain Hierarchy:** Subdivided into logical domain modules (`src/servers/bitwarden`, `src/servers/workspace/gmail`).
 - **Single Binary Multiplexer:** Unified CLI entry point running distinct MCP servers via subcommands (`smcp <domain> <server>`).
+- **Zero Hardcoding:** Works out-of-the-box for any user via standard environment variables or standard config paths. Display names and identity are dynamically discovered directly from the server.
 - **Zero Interpreter Overhead:** Native Rust executable using Tokio and official MCP SDK (`rmcp`), minimizing memory footprint and process spawn latency.
-- **Agent Self-Sufficient:** Native credential resolution and automated session lifecycle handling without manual terminal intervention.
 
 ---
 
@@ -15,28 +15,35 @@ A modular, high-performance Model Context Protocol (MCP) server suite built in R
 
 ### 1. Bitwarden (`smcp bitwarden serve`)
 
-Integrates with the local Bitwarden CLI (`bw`) through stdio transport. It transparently manages vault unlock state, caching session keys in memory while resolving credentials automatically from secure configuration files.
+Integrates with the local Bitwarden CLI (`bw`) through stdio transport. Transparently manages session unlocking and caching.
+
+#### Configuration (Dynamic Resolution)
+Resolves master password in order:
+1. Environment: `BW_PASSWORD` or `BITWARDEN_MASTER_PASSWORD`
+2. Config files: `~/.config/credentials/bitwarden_master_password` or `~/.config/credentials/bitwarden_credentials`
 
 #### Registered Tools
 
-- `bitwarden_status`
-  - Description: Check Bitwarden vault status, user email, and last sync timestamp.
-- `bitwarden_sync`
-  - Description: Sync local vault cache with remote Bitwarden servers.
-- `bitwarden_list_items`
-  - Description: Retrieve sanitized list of vault items (ID, Name, Type, Username). Optional search query filter.
-- `bitwarden_get_item`
-  - Description: Get complete JSON metadata for a specific vault item by name or ID.
-- `bitwarden_get_password`
-  - Description: Directly retrieve item password without parsing raw payload.
-- `bitwarden_get_totp`
-  - Description: Generate live 2FA TOTP code for a designated vault item.
+- `bitwarden_status`: Check Bitwarden vault status, user email, and last sync timestamp.
+- `bitwarden_sync`: Sync local vault cache with remote Bitwarden servers.
+- `bitwarden_list_items`: Retrieve sanitized list of vault items (ID, Name, Type, Username). Optional search query filter.
+- `bitwarden_get_item`: Get complete JSON metadata for a specific vault item by name or ID.
+- `bitwarden_get_password`: Directly retrieve item password without parsing raw payload.
+- `bitwarden_get_totp`: Generate live 2FA TOTP code for a designated vault item.
 
 ---
 
 ### 2. Google Workspace (`smcp workspace gmail`)
 
-Direct IMAP (TLS) and SMTP (TLS) client built in native Rust without Python wrappers or web browser automation.
+Direct IMAP (TLS) and SMTP (TLS) client built in native Rust without external Python or browser dependencies.
+
+#### Configuration (Dynamic Resolution)
+1. Email & App Password resolved from:
+   - Environment: `GMAIL_EMAIL` and `GMAIL_APP_PASSWORD`
+   - Files: `~/.config/credentials/gmail_credentials` or `~/.config/credentials/gmail_app_password`
+2. Sender display name:
+   - Automatically detected from the authenticated user's sent mailbox on the IMAP server.
+   - Can be overridden via tool argument (`from_name`) if desired.
 
 #### Registered Tools
 
@@ -55,27 +62,7 @@ Direct IMAP (TLS) and SMTP (TLS) client built in native Rust without Python wrap
     - `to` *(required, string)*: Recipient email
     - `subject` *(required, string)*: Subject line
     - `body` *(required, string)*: Email body
-    - `from_name` *(optional, string)*: Display sender name (default: "Muhammad Adriansyah")
-
----
-
-## Project Structure
-
-```
-SMCP/
-├── Cargo.toml
-├── LICENSE
-├── README.md
-└── src/
-    ├── main.rs
-    └── servers/
-        ├── mod.rs
-        ├── bitwarden/
-        │   └── mod.rs
-        └── workspace/
-            ├── mod.rs
-            └── gmail.rs
-```
+    - `from_name` *(optional, string)*: Custom sender display name (defaults to auto-detected server name)
 
 ---
 
