@@ -47,24 +47,14 @@ impl BitwardenService {
             }
         }
 
-        // 2. Check candidate credential file paths (~/.config/credentials/...)
-        let mut candidate_paths = Vec::new();
+        // 2. Check canonical credential file path (~/.config/credentials/bitwarden_master_password)
         if let Ok(home) = env::var("HOME") {
-            let h = PathBuf::from(home);
-            candidate_paths.push(h.join(".config/credentials/bitwarden_master_password"));
-            candidate_paths.push(h.join(".config/credentials/bitwarden_credentials"));
-            candidate_paths.push(h.join(".config/bitwarden/credentials"));
-        }
-
-        for path in candidate_paths {
+            let path = PathBuf::from(home).join(".config/credentials/bitwarden_master_password");
             if path.exists() {
                 if let Ok(content) = fs::read_to_string(&path) {
                     for line in content.lines() {
                         let trimmed = line.trim();
                         if let Some(val) = trimmed.strip_prefix("BITWARDEN_MASTER_PASSWORD=") {
-                            return Ok(val.trim().to_string());
-                        }
-                        if let Some(val) = trimmed.strip_prefix("BW_PASSWORD=") {
                             return Ok(val.trim().to_string());
                         }
                     }

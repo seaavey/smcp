@@ -55,16 +55,8 @@ impl GmailService {
         let mut email = env::var("GMAIL_EMAIL").unwrap_or_default().trim().to_string();
         let mut app_password = env::var("GMAIL_APP_PASSWORD").unwrap_or_default().trim().to_string();
 
-        let mut candidate_paths = Vec::new();
         if let Ok(home) = env::var("HOME") {
-            let h = PathBuf::from(home);
-            candidate_paths.push(h.join(".config/credentials/workspace-google"));
-            candidate_paths.push(h.join(".config/credentials/gmail_credentials"));
-            candidate_paths.push(h.join(".config/credentials/gmail_app_password"));
-            candidate_paths.push(h.join(".config/credentials/bitwarden_credentials"));
-        }
-
-        for path in candidate_paths {
+            let path = PathBuf::from(home).join(".config/credentials/workspace-google");
             if path.exists() {
                 if let Ok(content) = fs::read_to_string(&path) {
                     for line in content.lines() {
@@ -74,21 +66,10 @@ impl GmailService {
                                 email = val.trim().to_string();
                             }
                         }
-                        if let Some(val) = trimmed.strip_prefix("BITWARDEN_EMAIL=") {
-                            if email.is_empty() {
-                                email = val.trim().to_string();
-                            }
-                        }
                         if let Some(val) = trimmed.strip_prefix("GMAIL_APP_PASSWORD=") {
                             if app_password.is_empty() {
                                 app_password = val.trim().to_string();
                             }
-                        }
-                    }
-                    if app_password.is_empty() {
-                        let raw = content.trim();
-                        if !raw.contains('=') && !raw.is_empty() {
-                            app_password = raw.to_string();
                         }
                     }
                 }
