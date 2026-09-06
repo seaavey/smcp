@@ -28,14 +28,20 @@ pub struct SetCredentialsParam {
 pub struct CheckEmailsParam {
     #[schemars(description = "Maximum number of recent emails to retrieve (default: 10, max: 30)")]
     pub limit: Option<u32>,
-    #[schemars(description = "Optional filter: 'all' or 'unread' (default: 'unread')")]
+    #[schemars(description = "Filter type: 'unread', 'all', 'read', 'starred', 'flagged' (default: 'unread')")]
     pub filter: Option<String>,
+    #[schemars(description = "Mailbox/folder: 'inbox', 'spam', 'trash', 'sent', 'drafts', 'all', 'starred', 'important' (default: 'inbox')")]
+    pub folder: Option<String>,
+    #[schemars(description = "Optional search query to filter by sender, subject, or keyword")]
+    pub query: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct ReadEmailParam {
     #[schemars(description = "The numeric sequence ID of the email from check_emails")]
     pub id: u32,
+    #[schemars(description = "Mailbox/folder the email is in (default: 'inbox')")]
+    pub folder: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -121,8 +127,21 @@ impl GmailService {
         Ok(session)
     }
 
+    pub fn resolve_mailbox_name(folder: Option<&str>) -> &'static str {
+        match folder.unwrap_or("inbox").to_lowercase().as_str() {
+            "spam" | "junk" => "[Gmail]/Spam",
+            "trash" | "bin" => "[Gmail]/Trash",
+            "sent" | "sentmail" | "sent_mail" => "[Gmail]/Sent Mail",
+            "drafts" | "draft" => "[Gmail]/Drafts",
+            "all" | "allmail" | "all_mail" => "[Gmail]/All Mail",
+            "starred" => "[Gmail]/Starred",
+            "important" => "[Gmail]/Important",
+            _ => "INBOX",
+        }
+    }
+
     fn detect_sender_name(session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStream>>, my_email: &str) -> Option<String> {
-        let sent_folders = ["[Gmail]/Sent Mail", "[Gmail]/Sent", "Sent", "Sent Messages", "INBOX"];
+        let sent_folders = ["[Gmail]/Sent Mail", "INBOX"];
         for folder in sent_folders {
             if session.select(folder).is_ok() {
                 if let Ok(seqs) = session.search(format!("FROM \"{my_email}\"")) {
@@ -178,7 +197,6 @@ impl GmailService {
             }).to_string();
         }
 
-        // Test login immediately before saving
         let em = email.clone();
         let pw = clean_pwd.clone();
         let test_res = tokio::task::spawn_blocking(move || {
@@ -192,7 +210,6 @@ impl GmailService {
             }).to_string();
         }
 
-        // Save credentials
         let base = if let Ok(home) = env::var("HOME") {
             PathBuf::from(home)
         } else {
@@ -222,7 +239,10 @@ impl GmailService {
         }).to_string()
     }
 
-    #[tool(name = "gmail_check_emails", description = "Check recent emails in INBOX (returns ID, date, from, and subject)")]
+    #[tool(
+        name = "gmail_check_emails",
+        description = "Check recent emails across mailboxes (INBOX, Spam, Trash, Sent, Starred) with filter and search options"
+    )]
     pub async fn check_emails(&self, #[tool(aggr)] param: CheckEmailsParam) -> String {
         tokio::task::spawn_blocking(move || {
             let mut session = match Self::connect_imap_sync() {
@@ -230,26 +250,40 @@ impl GmailService {
                 Err(e) => return format!("{{\"error\": \"{e}\"}}"),
             };
 
-            if let Err(e) = session.select("INBOX") {
-                return format!("{{\"error\": \"Failed to select INBOX: {e}\"}}");
+            let mailbox = Self::resolve_mailbox_name(param.folder.as_deref());
+            if let Err(e) = session.select(mailbox) {
+                return format!("{{\"error\": \"Failed to select mailbox '{mailbox}': {e}\"}}");
             }
 
             let filter = param.filter.unwrap_or_else(|| "unread".into());
-            let query = if filter.to_lowercase() == "all" {
-                "ALL"
-            } else {
-                "UNSEEN"
+            let base_query = match filter.to_lowercase().as_str() {
+                "all" => "ALL",
+                "read" | "seen" => "SEEN",
+                "starred" | "flagged" => "FLAGGED",
+                _ => "UNSEEN",
             };
 
-            let seq_set = match session.search(query) {
+            let imap_search_query = if let Some(ref q) = param.query {
+                let trimmed = q.trim();
+                if !trimmed.is_empty() {
+                    format!("{base_query} TEXT \"{trimmed}\"")
+                } else {
+                    base_query.to_string()
+                }
+            } else {
+                base_query.to_string()
+            };
+
+            let seq_set = match session.search(&imap_search_query) {
                 Ok(set) => set,
-                Err(e) => return format!("{{\"error\": \"Failed to search emails: {e}\"}}"),
+                Err(e) => return format!("{{\"error\": \"Failed to search emails with query '{imap_search_query}': {e}\"}}"),
             };
 
             if seq_set.is_empty() {
                 let _ = session.logout();
                 return serde_json::json!({
-                    "message": format!("No emails found matching query: {query}"),
+                    "mailbox": mailbox,
+                    "message": format!("No emails found matching query: {imap_search_query}"),
                     "emails": []
                 }).to_string();
             }
@@ -265,7 +299,7 @@ impl GmailService {
                 .collect::<Vec<_>>()
                 .join(",");
 
-            let messages = match session.fetch(&query_str, "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)])") {
+            let messages = match session.fetch(&query_str, "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)] FLAGS)") {
                 Ok(msgs) => msgs,
                 Err(e) => return format!("{{\"error\": \"Failed to fetch headers: {e}\"}}"),
             };
@@ -292,6 +326,7 @@ impl GmailService {
 
                 email_list.push(serde_json::json!({
                     "id": id,
+                    "mailbox": mailbox,
                     "from": from,
                     "subject": subject,
                     "date": date
@@ -305,7 +340,7 @@ impl GmailService {
         .unwrap_or_else(|e| format!("{{\"error\": \"Task join error: {e}\"}}"))
     }
 
-    #[tool(name = "gmail_read_email", description = "Read complete content and body of an email by sequence ID")]
+    #[tool(name = "gmail_read_email", description = "Read complete content and body of an email by sequence ID and mailbox folder")]
     pub async fn read_email(&self, #[tool(aggr)] param: ReadEmailParam) -> String {
         tokio::task::spawn_blocking(move || {
             let mut session = match Self::connect_imap_sync() {
@@ -313,13 +348,14 @@ impl GmailService {
                 Err(e) => return format!("{{\"error\": \"{e}\"}}"),
             };
 
-            if let Err(e) = session.select("INBOX") {
-                return format!("{{\"error\": \"Failed to select INBOX: {e}\"}}");
+            let mailbox = Self::resolve_mailbox_name(param.folder.as_deref());
+            if let Err(e) = session.select(mailbox) {
+                return format!("{{\"error\": \"Failed to select mailbox '{mailbox}': {e}\"}}");
             }
 
             let messages = match session.fetch(param.id.to_string(), "BODY[]") {
                 Ok(m) => m,
-                Err(e) => return format!("{{\"error\": \"Failed to fetch message {}: {e}\"}}", param.id),
+                Err(e) => return format!("{{\"error\": \"Failed to fetch message {} from '{}': {e}\"}}", param.id, mailbox),
             };
 
             let mut full_body = String::new();
@@ -357,6 +393,7 @@ impl GmailService {
 
             serde_json::to_string_pretty(&serde_json::json!({
                 "id": param.id,
+                "mailbox": mailbox,
                 "from": from,
                 "subject": subject,
                 "date": date,

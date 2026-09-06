@@ -42,15 +42,27 @@ enum SetupCommands {
 
 #[derive(Subcommand)]
 enum CallCommands {
-    /// Check emails (Gmail)
+    /// Check emails (Gmail) across folders and filters
     GmailCheck {
         #[arg(short, long, default_value = "10")]
         limit: u32,
+        /// Filter type: unread, all, read, starred
         #[arg(short, long, default_value = "unread")]
         filter: String,
+        /// Folder: inbox, spam, trash, sent, drafts, all, starred, important
+        #[arg(long, default_value = "inbox")]
+        folder: String,
+        /// Search keyword
+        #[arg(short, long)]
+        query: Option<String>,
     },
-    /// Read an email by sequence ID
-    GmailRead { id: u32 },
+    /// Read an email by sequence ID and folder
+    GmailRead {
+        id: u32,
+        /// Folder: inbox, spam, trash, sent, drafts, all, starred
+        #[arg(long, default_value = "inbox")]
+        folder: String,
+    },
     /// Send an email
     GmailSend {
         #[arg(short, long)]
@@ -96,20 +108,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Setup(SetupCommands::Bitwarden) => {
             setup::setup_bitwarden()?;
         }
-        Commands::Call(CallCommands::GmailCheck { limit, filter }) => {
+        Commands::Call(CallCommands::GmailCheck {
+            limit,
+            filter,
+            folder,
+            query,
+        }) => {
             let svc = GmailService::default();
             let res = svc
                 .check_emails(servers::workspace::gmail::CheckEmailsParam {
                     limit: Some(limit),
                     filter: Some(filter),
+                    folder: Some(folder),
+                    query,
                 })
                 .await;
             println!("{res}");
         }
-        Commands::Call(CallCommands::GmailRead { id }) => {
+        Commands::Call(CallCommands::GmailRead { id, folder }) => {
             let svc = GmailService::default();
             let res = svc
-                .read_email(servers::workspace::gmail::ReadEmailParam { id })
+                .read_email(servers::workspace::gmail::ReadEmailParam {
+                    id,
+                    folder: Some(folder),
+                })
                 .await;
             println!("{res}");
         }
