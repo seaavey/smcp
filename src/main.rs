@@ -1,4 +1,5 @@
 mod servers;
+mod setup;
 
 use clap::{Parser, Subcommand};
 use rmcp::{transport::io::stdio, ServiceExt};
@@ -14,6 +15,10 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Interactive credential setup & verification wizards
+    #[command(subcommand)]
+    Setup(SetupCommands),
+
     /// Bitwarden Vault Management
     #[command(subcommand)]
     Bitwarden(BitwardenCommands),
@@ -21,6 +26,14 @@ enum Commands {
     /// Google Workspace Suite (Gmail, etc.)
     #[command(subcommand)]
     Workspace(WorkspaceCommands),
+}
+
+#[derive(Subcommand)]
+enum SetupCommands {
+    /// Setup Gmail credentials (App Password)
+    Gmail,
+    /// Setup Bitwarden Master Password
+    Bitwarden,
 }
 
 #[derive(Subcommand)]
@@ -40,6 +53,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Setup(SetupCommands::Gmail) => {
+            setup::setup_gmail()?;
+        }
+        Commands::Setup(SetupCommands::Bitwarden) => {
+            setup::setup_bitwarden()?;
+        }
         Commands::Bitwarden(BitwardenCommands::Serve) => {
             let server = BitwardenService::default();
             let transport = stdio();

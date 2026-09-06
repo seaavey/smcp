@@ -5,9 +5,23 @@ A modular, high-performance Model Context Protocol (MCP) server suite built in R
 ## Architecture & Design Goals
 
 - **Modular Domain Hierarchy:** Subdivided into logical domain modules (`src/servers/bitwarden`, `src/servers/workspace/gmail`).
-- **Single Binary Multiplexer:** Unified CLI entry point running distinct MCP servers via subcommands (`smcp <domain> <server>`).
+- **Interactive Setup Wizards:** Includes `smcp setup <gmail|bitwarden>` to easily set and verify credentials with instant connectivity tests.
 - **Zero Hardcoding:** Works out-of-the-box for any user via standard environment variables or standard config paths. Display names and identity are dynamically discovered directly from the server.
 - **Zero Interpreter Overhead:** Native Rust executable using Tokio and official MCP SDK (`rmcp`), minimizing memory footprint and process spawn latency.
+
+---
+
+## Interactive Credential Setup
+
+SMCP includes built-in setup wizards that prompt for credentials, store them securely in `~/.config/credentials/`, and instantly test authentication.
+
+```bash
+# Setup & test Gmail credentials (App Password)
+smcp setup gmail
+
+# Setup & test Bitwarden Master Password
+smcp setup bitwarden
+```
 
 ---
 
@@ -17,10 +31,10 @@ A modular, high-performance Model Context Protocol (MCP) server suite built in R
 
 Integrates with the local Bitwarden CLI (`bw`) through stdio transport. Transparently manages session unlocking and caching.
 
-#### Configuration (Dynamic Resolution)
-Resolves master password in order:
-1. Environment: `BW_PASSWORD` or `BITWARDEN_MASTER_PASSWORD`
-2. Config files: `~/.config/credentials/bitwarden_master_password` or `~/.config/credentials/bitwarden_credentials`
+#### Configuration
+- Interactive: `smcp setup bitwarden`
+- Or Environment: `BW_PASSWORD` or `BITWARDEN_MASTER_PASSWORD`
+- Or Config File: `~/.config/credentials/bitwarden_master_password`
 
 #### Registered Tools
 
@@ -37,13 +51,18 @@ Resolves master password in order:
 
 Direct IMAP (TLS) and SMTP (TLS) client built in native Rust without external Python or browser dependencies.
 
-#### Configuration (Dynamic Resolution)
-1. Email & App Password resolved from:
-   - Environment: `GMAIL_EMAIL` and `GMAIL_APP_PASSWORD`
-   - Files: `~/.config/credentials/gmail_credentials` or `~/.config/credentials/gmail_app_password`
-2. Sender display name:
-   - Automatically detected from the authenticated user's sent mailbox on the IMAP server.
-   - Can be overridden via tool argument (`from_name`) if desired.
+#### Account Setup for Gmail:
+1. Enable **2-Step Verification** on your Google Account:
+   https://myaccount.google.com/signinoptions/two-step-verification
+2. Generate a 16-character **App Password** for 'Mail':
+   https://myaccount.google.com/apppasswords
+3. Run the setup wizard:
+   ```bash
+   smcp setup gmail
+   ```
+   *(Or set `GMAIL_EMAIL` and `GMAIL_APP_PASSWORD` environment variables / file).*
+
+Sender display names are automatically detected from the authenticated user's sent mailbox on the IMAP server.
 
 #### Registered Tools
 
