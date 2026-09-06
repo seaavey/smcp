@@ -33,9 +33,36 @@ pub struct GetItemParam {
     pub id_or_name: String,
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub struct CreateLoginItemParam {
+    #[schemars(description = "Item name (e.g. 'GitHub Prod', 'OpenAI')")]
+    pub name: String,
+    #[schemars(description = "Username or email")]
+    pub username: String,
+    #[schemars(description = "Password for the login item")]
+    pub password: String,
+    #[schemars(description = "Optional website URI / URL")]
+    pub uri: Option<String>,
+    #[schemars(description = "Optional notes")]
+    pub notes: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct GeneratePasswordParam {
+    #[schemars(description = "Password length (default: 24)")]
+    pub length: Option<u32>,
+    #[schemars(description = "Include special characters (default: true)")]
+    pub special: Option<bool>,
+    #[schemars(description = "Include numbers (default: true)")]
+    pub numbers: Option<bool>,
+    #[schemars(description = "Include uppercase letters (default: true)")]
+    pub uppercase: Option<bool>,
+    #[schemars(description = "Include lowercase letters (default: true)")]
+    pub lowercase: Option<bool>,
+}
+
 impl BitwardenService {
     fn resolve_master_password() -> Result<String, String> {
-        // 1. Check environment variable
         if let Ok(val) = env::var("BW_PASSWORD") {
             if !val.trim().is_empty() {
                 return Ok(val.trim().to_string());
@@ -47,7 +74,6 @@ impl BitwardenService {
             }
         }
 
-        // 2. Check canonical credential file path (~/.config/credentials/bitwarden_master_password)
         if let Ok(home) = env::var("HOME") {
             let path = PathBuf::from(home).join(".config/credentials/bitwarden_master_password");
             if path.exists() {
@@ -117,6 +143,34 @@ impl BitwardenService {
 
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
+
+    fn run_bw_stdin(&self, args: &[&str], input: &str) -> Result<String, String> {
+        use std::io::Write;
+        let session = self.get_or_unlock_session()?;
+        let mut cmd_args = args.to_vec();
+        cmd_args.push("--session");
+        cmd_args.push(&session);
+
+        let mut child = Command::new("bw")
+            .args(&cmd_args)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("Failed to spawn bw: {e}"))?;
+
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin.write_all(input.as_bytes()).map_err(|e| format!("Write stdin failed: {e}"))?;
+        }
+
+        let output = child.wait_with_output().map_err(|e| format!("Wait bw failed: {e}"))?;
+        if !output.status.success() {
+            let err = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("bw error: {err}"));
+        }
+
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
 }
 
 #[tool(tool_box)]
@@ -134,7 +188,6 @@ impl BitwardenService {
             }).to_string();
         }
 
-        // Test unlock immediately
         let output = match Command::new("bw").args(["unlock", &pwd, "--raw"]).output() {
             Ok(o) => o,
             Err(e) => return serde_json::json!({
@@ -198,6 +251,112 @@ impl BitwardenService {
         match self.run_bw(&["sync"]) {
             Ok(_) => "{\"status\": \"synced\"}".into(),
             Err(e) => format!("{{\"error\": \"{e}\"}}"),
+        }
+    }
+
+    #[tool(name = "bitwarden_generate_password", description = "Generate a secure random password using Bitwarden CLI")]
+    pub async fn generate_password(&self, #[tool(aggr)] param: GeneratePasswordParam) -> String {
+        let length_str = param.length.unwrap_or(24).to_string();
+        let mut args = vec!["generate", "--length", &length_str];
+
+        let special = param.special.unwrap_or(true);
+        let numbers = param.numbers.unwrap_or(true);
+        let uppercase = param.uppercase.unwrap_or(true);
+        let lowercase = param.lowercase.unwrap_or(true);
+
+        if special {
+            args.push("-s");
+        }
+        if uppercase {
+            args.push("-u");
+        }
+        if lowercase {
+            args.push("-l");
+        }
+        if numbers {
+            args.push("-n");
+        }
+
+        let output = match Command::new("bw").args(&args).output() {
+            Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+            Ok(o) => format!("Error: {}", String::from_utf8_lossy(&o.stderr)),
+            Err(e) => format!("Error running bw: {e}"),
+        };
+
+        serde_json::json!({
+            "generated_password": output
+        }).to_string()
+    }
+
+    #[tool(name = "bitwarden_create_login_item", description = "Create and save a new login item/credential into Bitwarden vault")]
+    pub async fn create_login_item(&self, #[tool(aggr)] param: CreateLoginItemParam) -> String {
+        // Step 1: get template
+        let template_raw = match self.run_bw(&["get", "template", "item"]) {
+            Ok(r) => r,
+            Err(e) => return format!("{{\"error\": \"Failed to get item template: {e}\"}}"),
+        };
+
+        let login_template_raw = match self.run_bw(&["get", "template", "item.login"]) {
+            Ok(r) => r,
+            Err(e) => return format!("{{\"error\": \"Failed to get login template: {e}\"}}"),
+        };
+
+        let mut item: serde_json::Value = match serde_json::from_str(&template_raw) {
+            Ok(v) => v,
+            Err(e) => return format!("{{\"error\": \"Template parse error: {e}\"}}"),
+        };
+
+        let mut login: serde_json::Value = match serde_json::from_str(&login_template_raw) {
+            Ok(v) => v,
+            Err(e) => return format!("{{\"error\": \"Login template parse error: {e}\"}}"),
+        };
+
+        login["username"] = serde_json::Value::String(param.username);
+        login["password"] = serde_json::Value::String(param.password);
+        if let Some(uri) = param.uri {
+            let mut uri_obj = serde_json::Map::new();
+            uri_obj.insert("uri".into(), serde_json::Value::String(uri));
+            login["uris"] = serde_json::Value::Array(vec![serde_json::Value::Object(uri_obj)]);
+        }
+
+        item["type"] = serde_json::json!(1); // 1 = Login
+        item["name"] = serde_json::Value::String(param.name);
+        if let Some(n) = param.notes {
+            item["notes"] = serde_json::Value::String(n);
+        }
+        item["login"] = login;
+
+        let payload_str = serde_json::to_string(&item).unwrap_or_default();
+
+        // Step 2: encode via bw encode
+        let encoded_output = match Command::new("bw")
+            .arg("encode")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+        {
+            Ok(mut child) => {
+                use std::io::Write;
+                if let Some(mut stdin) = child.stdin.take() {
+                    let _ = stdin.write_all(payload_str.as_bytes());
+                }
+                match child.wait_with_output() {
+                    Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).trim().to_string(),
+                    Ok(out) => return format!("{{\"error\": \"bw encode failed: {}\"}}", String::from_utf8_lossy(&out.stderr)),
+                    Err(e) => return format!("{{\"error\": \"bw encode failed: {e}\"}}"),
+                }
+            }
+            Err(e) => return format!("{{\"error\": \"Failed to run bw encode: {e}\"}}"),
+        };
+
+        // Step 3: create item
+        match self.run_bw_stdin(&["create", "item"], &encoded_output) {
+            Ok(res) => {
+                // Sync remote vault
+                let _ = self.run_bw(&["sync"]);
+                res
+            }
+            Err(e) => format!("{{\"error\": \"Failed to create item: {e}\"}}"),
         }
     }
 

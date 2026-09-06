@@ -56,10 +56,27 @@ enum CallCommands {
         #[arg(short, long)]
         query: Option<String>,
     },
-    /// Read an email by sequence ID and folder
+    /// Read an email by permanent UID and folder
     GmailRead {
-        id: u32,
+        uid: u32,
         /// Folder: inbox, spam, trash, sent, drafts, all, starred
+        #[arg(long, default_value = "inbox")]
+        folder: String,
+    },
+    /// Reply to an email by permanent UID
+    GmailReply {
+        uid: u32,
+        #[arg(short, long)]
+        body: String,
+        #[arg(long, default_value = "inbox")]
+        folder: String,
+        #[arg(long)]
+        from_name: Option<String>,
+    },
+    /// Manage email (mark_read, mark_unread, star, unstar, trash) by UID
+    GmailManage {
+        uid: u32,
+        action: String,
         #[arg(long, default_value = "inbox")]
         folder: String,
     },
@@ -72,7 +89,14 @@ enum CallCommands {
         #[arg(short, long)]
         body: String,
         #[arg(long)]
+        is_html: bool,
+        #[arg(long)]
         from_name: Option<String>,
+    },
+    /// Generate a strong password via Bitwarden CLI
+    BwGenerate {
+        #[arg(short, long, default_value = "24")]
+        length: u32,
     },
     /// List Bitwarden items
     BwList {
@@ -125,11 +149,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .await;
             println!("{res}");
         }
-        Commands::Call(CallCommands::GmailRead { id, folder }) => {
+        Commands::Call(CallCommands::GmailRead { uid, folder }) => {
             let svc = GmailService::default();
             let res = svc
                 .read_email(servers::workspace::gmail::ReadEmailParam {
-                    id,
+                    uid,
+                    folder: Some(folder),
+                })
+                .await;
+            println!("{res}");
+        }
+        Commands::Call(CallCommands::GmailReply {
+            uid,
+            body,
+            folder,
+            from_name,
+        }) => {
+            let svc = GmailService::default();
+            let res = svc
+                .reply_email(servers::workspace::gmail::ReplyEmailParam {
+                    uid,
+                    folder: Some(folder),
+                    body,
+                    from_name,
+                })
+                .await;
+            println!("{res}");
+        }
+        Commands::Call(CallCommands::GmailManage {
+            uid,
+            action,
+            folder,
+        }) => {
+            let svc = GmailService::default();
+            let res = svc
+                .manage_email(servers::workspace::gmail::ManageEmailParam {
+                    uid,
+                    action,
                     folder: Some(folder),
                 })
                 .await;
@@ -139,6 +195,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             to,
             subject,
             body,
+            is_html,
             from_name,
         }) => {
             let svc = GmailService::default();
@@ -147,7 +204,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     to,
                     subject,
                     body,
+                    is_html: Some(is_html),
                     from_name,
+                })
+                .await;
+            println!("{res}");
+        }
+        Commands::Call(CallCommands::BwGenerate { length }) => {
+            let svc = BitwardenService::default();
+            let res = svc
+                .generate_password(servers::bitwarden::GeneratePasswordParam {
+                    length: Some(length),
+                    special: Some(true),
+                    numbers: Some(true),
+                    uppercase: Some(true),
+                    lowercase: Some(true),
                 })
                 .await;
             println!("{res}");

@@ -5,10 +5,11 @@ A modular, high-performance Model Context Protocol (MCP) server suite built in R
 ## Architecture & Design Goals
 
 - **Modular Domain Hierarchy:** Subdivided into logical domain modules (`src/servers/bitwarden`, `src/servers/workspace/gmail`).
-- **Autonomous & In-Band MCP Setup:** Credentials can be configured **interactively via CLI** (`smcp setup ...`) OR **directly through MCP tool calls** (`gmail_set_credentials`, `bitwarden_set_password`) by an AI agent mid-conversation with pre-save TLS verification.
-- **Single Canonical Config Paths:** Canonical locations (`~/.config/credentials/workspace-google` and `~/.config/credentials/bitwarden_master_password`).
+- **Autonomous & In-Band MCP Setup:** Credentials can be configured **interactively via CLI** (`smcp setup ...`) OR **directly through MCP tool calls** (`gmail_set_credentials`, `bitwarden_set_password`) by an AI agent mid-conversation with pre-save TLS/unlock verification.
+- **Permanent UID Email Model:** Gmail uses permanent IMAP UIDs (Unique Identifiers) rather than ephemeral sequence numbers, ensuring robust actions and threading.
+- **Full Email Lifecycle:** Read, search, send (HTML/text), auto-threaded reply (`In-Reply-To`/`References`), attachment metadata, and email management (`trash`, `star`, `mark_read`).
+- **Bitwarden Vault Mutation:** Create login credentials and generate secure random passwords directly from the suite.
 - **Direct CLI Subcommand Runner:** Test and use any capability directly via `smcp call ...` without starting an MCP server daemon or using Python.
-- **Zero Hardcoding:** Works out-of-the-box for any user. Sender display names are dynamically discovered directly from the server.
 
 ---
 
@@ -20,17 +21,23 @@ smcp call gmail-check --folder spam --filter all --limit 5
 smcp call gmail-check --folder inbox --filter all --query Bitwarden
 smcp call gmail-check --limit 10 --filter unread
 
-# Read an email by sequence ID (with optional folder)
-smcp call gmail-read 964 --folder inbox
-smcp call gmail-read 5 --folder spam
+# Read an email by permanent UID (with attachments & header metadata)
+smcp call gmail-read 5301 --folder inbox
 
-# Send an email
-smcp call gmail-send --to someone@example.com --subject "Subject" --body "Message text"
+# Reply to an email (automatically tracks subject and In-Reply-To thread)
+smcp call gmail-reply 5301 --body "Thank you, verified!"
+
+# Manage emails (trash, mark_read, mark_unread, star, unstar)
+smcp call gmail-manage 5301 trash
+
+# Send an email (plain text or HTML)
+smcp call gmail-send --to someone@example.com --subject "Subject" --body "<h1>Hello</h1>" --is-html
 
 # Bitwarden items & passwords
 smcp call bw-list --query crowdgen
 smcp call bw-password CrowdGen
 smcp call bw-totp CrowdGen
+smcp call bw-generate --length 24
 ```
 
 ---
@@ -43,32 +50,24 @@ Native Rust IMAP/SMTP client supporting full mailbox traversal (`INBOX`, `[Gmail
 
 #### Registered Tools
 
-- `gmail_set_credentials`
-  - Description: Set and save Gmail credentials (email and App Password) directly via MCP, testing the connection immediately.
-- `gmail_check_emails`
-  - Description: Check recent emails across mailboxes with folder, filter, and keyword search options.
-  - Parameters:
-    - `limit` *(optional, uint, default: 10, max: 30)*
-    - `filter` *(optional, string)*: `'unread'` (default), `'all'`, `'read'`, `'starred'`
-    - `folder` *(optional, string)*: `'inbox'` (default), `'spam'`, `'trash'`, `'sent'`, `'drafts'`, `'all'`, `'starred'`, `'important'`
-    - `query` *(optional, string)*: Keyword search query
-- `gmail_read_email`
-  - Description: Read full parsed body and headers of an email by sequence ID and mailbox folder.
-  - Parameters:
-    - `id` *(required, uint)*
-    - `folder` *(optional, string, default: 'inbox')*
-- `gmail_send_email`
-  - Description: Send text emails via Gmail SMTP relay (`smtp.gmail.com:587`).
+- `gmail_set_credentials`: Set and save Gmail credentials directly via MCP, testing the TLS connection immediately before saving.
+- `gmail_check_emails`: Check recent emails with permanent `uid`, filter (`unread`, `all`, `read`, `starred`), folder, and search query.
+- `gmail_read_email`: Read complete content, attachment metadata (`filename`, `content_type`, `size`), sender/receiver headers, and body by `uid`.
+- `gmail_reply_email`: Reply to an existing email thread using `uid` (automatically extracts sender, injects `In-Reply-To`, `References`, and `Re:` subject).
+- `gmail_manage_email`: Execute inbox triage actions (`mark_read`, `mark_unread`, `star`, `unstar`, `trash`) by `uid`.
+- `gmail_send_email`: Send emails via Gmail SMTP relay (supports plain text or HTML formatting).
 
 ---
 
 ### 2. Bitwarden (`smcp bitwarden serve`)
 
-Integrates with the local Bitwarden CLI (`bw`) through stdio transport. Transparently manages session unlocking and caching.
+Integrates with the local Bitwarden CLI (`bw`) through stdio transport. Transparently manages session unlocking, caching, and item creation.
 
 #### Registered Tools
 
 - `bitwarden_set_password`: Set and save Bitwarden Master Password directly via MCP, testing unlock immediately.
+- `bitwarden_generate_password`: Generate cryptographically secure passwords via Bitwarden CLI options (`length`, `special`, `numbers`, `uppercase`, `lowercase`).
+- `bitwarden_create_login_item`: Create and store new login credentials into the vault (`name`, `username`, `password`, `uri`, `notes`).
 - `bitwarden_status`: Check Bitwarden vault status, user email, and last sync timestamp.
 - `bitwarden_sync`: Sync local vault cache with remote Bitwarden servers.
 - `bitwarden_list_items`: Retrieve sanitized list of vault items (ID, Name, Type, Username). Optional search query filter.

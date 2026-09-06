@@ -46,16 +46,8 @@ pub fn setup_gmail() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let creds_dir = get_credentials_dir();
-    fs::create_dir_all(&creds_dir)?;
-
-    let creds_file = creds_dir.join("workspace-google");
-    let content = format!("GMAIL_EMAIL={email}\nGMAIL_APP_PASSWORD={password}\n");
-    fs::write(&creds_file, content)?;
-
     println!("--------------------------------------------------");
-    println!("✓ Credentials saved to: {}", creds_file.display());
-    println!("Testing IMAP connection...");
+    println!("Testing IMAP connection before saving...");
 
     let tls = native_tls::TlsConnector::builder().build()?;
     match imap::connect(("imap.gmail.com", 993), "imap.gmail.com", &tls) {
@@ -76,6 +68,14 @@ pub fn setup_gmail() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    let creds_dir = get_credentials_dir();
+    fs::create_dir_all(&creds_dir)?;
+
+    let creds_file = creds_dir.join("workspace-google");
+    let content = format!("GMAIL_EMAIL={email}\nGMAIL_APP_PASSWORD={password}\n");
+    fs::write(&creds_file, content)?;
+
+    println!("✓ Credentials saved to: {}", creds_file.display());
     println!("Setup completed successfully!");
     Ok(())
 }
@@ -100,16 +100,8 @@ pub fn setup_bitwarden() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let creds_dir = get_credentials_dir();
-    fs::create_dir_all(&creds_dir)?;
-
-    let creds_file = creds_dir.join("bitwarden_master_password");
-    let content = format!("BITWARDEN_MASTER_PASSWORD={password}\n");
-    fs::write(&creds_file, content)?;
-
     println!("--------------------------------------------------");
-    println!("✓ Credentials saved to: {}", creds_file.display());
-    println!("Testing Bitwarden CLI unlock...");
+    println!("Testing Bitwarden CLI unlock before saving...");
 
     let output = std::process::Command::new("bw")
         .args(["unlock", &password, "--raw"])
@@ -122,13 +114,23 @@ pub fn setup_bitwarden() -> Result<(), Box<dyn std::error::Error>> {
         Ok(out) => {
             let err = String::from_utf8_lossy(&out.stderr);
             eprintln!("✗ Bitwarden unlock failed: {err}");
+            return Ok(());
         }
         Err(e) => {
             eprintln!("✗ Failed to run `bw`: {e}");
             eprintln!("Please ensure Bitwarden CLI is installed (`npm i -g @bitwarden/cli`).");
+            return Ok(());
         }
     }
 
+    let creds_dir = get_credentials_dir();
+    fs::create_dir_all(&creds_dir)?;
+
+    let creds_file = creds_dir.join("bitwarden_master_password");
+    let content = format!("BITWARDEN_MASTER_PASSWORD={password}\n");
+    fs::write(&creds_file, content)?;
+
+    println!("✓ Credentials saved to: {}", creds_file.display());
     println!("Setup completed!");
     Ok(())
 }
