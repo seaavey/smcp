@@ -49,7 +49,7 @@ pub fn setup_gmail() -> Result<(), Box<dyn std::error::Error>> {
     let creds_dir = get_credentials_dir();
     fs::create_dir_all(&creds_dir)?;
 
-    let creds_file = creds_dir.join("gmail_credentials");
+    let creds_file = creds_dir.join("workspace-google");
     let content = format!("GMAIL_EMAIL={email}\nGMAIL_APP_PASSWORD={password}\n");
     fs::write(&creds_file, content)?;
 

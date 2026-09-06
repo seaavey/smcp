@@ -58,6 +58,7 @@ impl GmailService {
         let mut candidate_paths = Vec::new();
         if let Ok(home) = env::var("HOME") {
             let h = PathBuf::from(home);
+            candidate_paths.push(h.join(".config/credentials/workspace-google"));
             candidate_paths.push(h.join(".config/credentials/gmail_credentials"));
             candidate_paths.push(h.join(".config/credentials/gmail_app_password"));
             candidate_paths.push(h.join(".config/credentials/bitwarden_credentials"));
@@ -224,7 +225,7 @@ impl GmailService {
             }).to_string();
         }
 
-        let creds_file = creds_dir.join("gmail_credentials");
+        let creds_file = creds_dir.join("workspace-google");
         let content = format!("GMAIL_EMAIL={email}\nGMAIL_APP_PASSWORD={clean_pwd}\n");
         if let Err(e) = fs::write(&creds_file, content) {
             return serde_json::json!({
