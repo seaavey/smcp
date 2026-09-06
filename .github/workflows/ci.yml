@@ -1,0 +1,85 @@
+name: Rust CI & Release
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check-and-test:
+    name: Check, Build & Test
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libssl-dev pkg-config
+
+    - name: Cache Cargo artifacts
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+
+    - name: Cargo Check
+      run: cargo check --verbose
+
+    - name: Cargo Build Release
+      run: cargo build --release --verbose
+
+    - name: Cargo Test
+      run: cargo test --verbose
+
+  release-binary:
+    name: Release Multi-Platform Binaries
+    needs: check-and-test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libssl-dev pkg-config
+
+    - name: Build release binary
+      run: cargo build --release
+
+    - name: Create tarball
+      run: |
+        cd target/release
+        tar -czvf smcp-linux-x86_64.tar.gz smcp
+        mv smcp-linux-x86_64.tar.gz ../../
+
+    - name: Upload GitHub Release Asset
+      uses: softprops/action-gh-release@v2
+      with:
+        files: smcp-linux-x86_64.tar.gz
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
