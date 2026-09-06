@@ -10,10 +10,11 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
 
 jobs:
   check-and-test:
-    name: Check, Build & Test
+    name: Fast CI (Check & Test)
     runs-on: ubuntu-latest
 
     steps:
@@ -23,32 +24,19 @@ jobs:
     - name: Set up Rust toolchain
       uses: dtolnay/rust-toolchain@stable
 
+    - name: Rust Cache (Swatinem)
+      uses: Swatinem/rust-cache@v2
+
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y libssl-dev pkg-config
-
-    - name: Cache Cargo artifacts
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/bin/
-          ~/.cargo/registry/index/
-          ~/.cargo/registry/cache/
-          ~/.cargo/git/db/
-          target/
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-
+        sudo apt-get install -y --no-install-recommends libssl-dev pkg-config
 
     - name: Cargo Check
-      run: cargo check --verbose
-
-    - name: Cargo Build Release
-      run: cargo build --release --verbose
+      run: cargo check
 
     - name: Cargo Test
-      run: cargo test --verbose
+      run: cargo test
 
   release-binary:
     name: Release Multi-Platform Binaries
@@ -63,10 +51,13 @@ jobs:
     - name: Set up Rust toolchain
       uses: dtolnay/rust-toolchain@stable
 
+    - name: Rust Cache (Swatinem)
+      uses: Swatinem/rust-cache@v2
+
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y libssl-dev pkg-config
+        sudo apt-get install -y --no-install-recommends libssl-dev pkg-config
 
     - name: Build release binary
       run: cargo build --release
