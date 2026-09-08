@@ -1,5 +1,5 @@
 use lettre::{
-    message::header::ContentType,
+    message::{header::ContentType, Attachment, MultiPart, SinglePart},
     transport::smtp::authentication::Credentials,
     AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
 };
@@ -78,6 +78,8 @@ pub struct SendEmailParam {
     pub is_html: Option<bool>,
     #[schemars(description = "Optional custom sender display name")]
     pub from_name: Option<String>,
+    #[schemars(description = "Optional local file paths to attach")]
+    pub attachments: Option<Vec<String>>,
 }
 
 impl GmailService {
@@ -677,6 +679,25 @@ impl GmailService {
             ContentType::TEXT_PLAIN
         };
 
+        let body_part = SinglePart::builder().header(ctype).body(param.body);
+        let mut multipart = MultiPart::mixed().singlepart(body_part);
+        for attachment_path in param.attachments.unwrap_or_default() {
+            let path = PathBuf::from(&attachment_path);
+            let filename = match path.file_name().and_then(|name| name.to_str()) {
+                Some(name) if !name.is_empty() => name.to_string(),
+                _ => return format!("{{\"error\": \"Invalid attachment path: {attachment_path}\"}}"),
+            };
+            let bytes = match fs::read(&path) {
+                Ok(bytes) => bytes,
+                Err(e) => return format!("{{\"error\": \"Failed to read attachment '{attachment_path}': {e}\"}}"),
+            };
+            let content_type = match ContentType::parse(mime_type_for_path(&path)) {
+                Ok(content_type) => content_type,
+                Err(e) => return format!("{{\"error\": \"Invalid attachment MIME type for '{attachment_path}': {e}\"}}"),
+            };
+            multipart = multipart.singlepart(Attachment::new(filename).body(bytes, content_type));
+        }
+
         let email = match Message::builder()
             .from(match from_header.parse() {
                 Ok(f) => f,
@@ -687,8 +708,7 @@ impl GmailService {
                 Err(e) => return format!("{{\"error\": \"Invalid recipient address: {e}\"}}"),
             })
             .subject(&param.subject)
-            .header(ctype)
-            .body(param.body)
+            .multipart(multipart)
         {
             Ok(m) => m,
             Err(e) => return format!("{{\"error\": \"Failed to build email: {e}\"}}"),
@@ -712,6 +732,17 @@ impl GmailService {
             .to_string(),
             Err(e) => format!("{{\"error\": \"Failed to send email: {e}\"}}"),
         }
+    }
+}
+
+fn mime_type_for_path(path: &std::path::Path) -> &'static str {
+    match path.extension().and_then(|ext| ext.to_str()).unwrap_or_default().to_ascii_lowercase().as_str() {
+        "pdf" => "application/pdf",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "txt" => "text/plain",
+        "html" | "htm" => "text/html",
+        _ => "application/octet-stream",
     }
 }
 

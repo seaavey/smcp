@@ -30,6 +30,9 @@ smcp call gmail-reply 5301 --body "Thank you, verified!"
 # Manage emails (trash, mark_read, mark_unread, star, unstar)
 smcp call gmail-manage 5301 trash
 
+# Send an email with an optional local attachment
+smcp call gmail-send --to someone@example.com --subject "Subject" --body "See attached file" --attachment /path/to/file.pdf
+
 # Send an email (plain text or HTML)
 smcp call gmail-send --to someone@example.com --subject "Subject" --body "<h1>Hello</h1>" --is-html
 
@@ -55,7 +58,7 @@ Native Rust IMAP/SMTP client supporting full mailbox traversal (`INBOX`, `[Gmail
 - `gmail_read_email`: Read complete content, attachment metadata (`filename`, `content_type`, `size`), sender/receiver headers, and body by `uid`.
 - `gmail_reply_email`: Reply to an existing email thread using `uid` (automatically extracts sender, injects `In-Reply-To`, `References`, and `Re:` subject).
 - `gmail_manage_email`: Execute inbox triage actions (`mark_read`, `mark_unread`, `star`, `unstar`, `trash`) by `uid`.
-- `gmail_send_email`: Send emails via Gmail SMTP relay (supports plain text or HTML formatting).
+- `gmail_send_email`: Send emails via Gmail SMTP relay (supports plain text, HTML, and local file attachments).
 
 ---
 

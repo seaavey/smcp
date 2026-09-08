@@ -92,6 +92,8 @@ enum CallCommands {
         is_html: bool,
         #[arg(long)]
         from_name: Option<String>,
+        #[arg(long = "attachment", value_name = "PATH")]
+        attachments: Vec<String>,
     },
     /// Generate a strong password via Bitwarden CLI
     BwGenerate {
@@ -197,6 +199,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             body,
             is_html,
             from_name,
+            attachments,
         }) => {
             let svc = GmailService::default();
             let res = svc
@@ -206,6 +209,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     body,
                     is_html: Some(is_html),
                     from_name,
+                    attachments: Some(attachments),
                 })
                 .await;
             println!("{res}");
