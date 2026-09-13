@@ -80,6 +80,31 @@ enum CallCommands {
         #[arg(long, default_value = "inbox")]
         folder: String,
     },
+    /// Apply one action to multiple Gmail messages selected by search criteria
+    GmailBulkManage {
+        action: String,
+        #[arg(long, default_value = "inbox")]
+        folder: String,
+        #[arg(short, long, default_value = "unread")]
+        filter: String,
+        #[arg(short, long)]
+        query: Option<String>,
+        #[arg(short, long, default_value = "30")]
+        limit: u32,
+    },
+    /// Send one email to multiple recipients
+    GmailBulkSend {
+        #[arg(short, long = "to", required = true)]
+        to: Vec<String>,
+        #[arg(short, long)]
+        subject: String,
+        #[arg(short, long)]
+        body: String,
+        #[arg(long)]
+        is_html: bool,
+        #[arg(long)]
+        from_name: Option<String>,
+    },
     /// Send an email
     GmailSend {
         #[arg(short, long)]
@@ -189,6 +214,45 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     uid,
                     action,
                     folder: Some(folder),
+                })
+                .await;
+            println!("{res}");
+        }
+        Commands::Call(CallCommands::GmailBulkManage {
+            action,
+            folder,
+            filter,
+            query,
+            limit,
+        }) => {
+            let svc = GmailService::default();
+            let res = svc
+                .bulk_manage_email(servers::workspace::gmail::BulkManageEmailParam {
+                    action,
+                    folder: Some(folder),
+                    filter: Some(filter),
+                    query,
+                    limit: Some(limit),
+                })
+                .await;
+            println!("{res}");
+        }
+        Commands::Call(CallCommands::GmailBulkSend {
+            to,
+            subject,
+            body,
+            is_html,
+            from_name,
+        }) => {
+            let svc = GmailService::default();
+            let res = svc
+                .bulk_send_email(servers::workspace::gmail::BulkSendEmailParam {
+                    to,
+                    subject,
+                    body,
+                    is_html: Some(is_html),
+                    from_name,
+                    attachments: None,
                 })
                 .await;
             println!("{res}");

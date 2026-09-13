@@ -5,7 +5,7 @@ use lettre::{
 };
 use rmcp::{
     model::{Implementation, ServerCapabilities, ServerInfo},
-    ServerHandler, tool,
+    tool, ServerHandler,
 };
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -20,7 +20,9 @@ pub struct GmailService;
 pub struct SetCredentialsParam {
     #[schemars(description = "User Gmail address (e.g. user@gmail.com)")]
     pub email: String,
-    #[schemars(description = "16-character Google App Password (generated from https://myaccount.google.com/apppasswords)")]
+    #[schemars(
+        description = "16-character Google App Password (generated from https://myaccount.google.com/apppasswords)"
+    )]
     pub app_password: String,
 }
 
@@ -28,9 +30,13 @@ pub struct SetCredentialsParam {
 pub struct CheckEmailsParam {
     #[schemars(description = "Maximum number of recent emails to retrieve (default: 10, max: 30)")]
     pub limit: Option<u32>,
-    #[schemars(description = "Filter type: 'unread', 'all', 'read', 'starred' (default: 'unread')")]
+    #[schemars(
+        description = "Filter type: 'unread', 'all', 'read', 'starred' (default: 'unread')"
+    )]
     pub filter: Option<String>,
-    #[schemars(description = "Mailbox/folder: 'inbox', 'spam', 'trash', 'sent', 'drafts', 'all', 'starred', 'important' (default: 'inbox')")]
+    #[schemars(
+        description = "Mailbox/folder: 'inbox', 'spam', 'trash', 'sent', 'drafts', 'all', 'starred', 'important' (default: 'inbox')"
+    )]
     pub folder: Option<String>,
     #[schemars(description = "Optional search query to filter by sender, subject, or keyword")]
     pub query: Option<String>,
@@ -60,10 +66,30 @@ pub struct ReplyEmailParam {
 pub struct ManageEmailParam {
     #[schemars(description = "The permanent UID of the email")]
     pub uid: u32,
-    #[schemars(description = "Action to execute: 'mark_read', 'mark_unread', 'star', 'unstar', 'trash'")]
+    #[schemars(
+        description = "Action to execute: 'mark_read', 'mark_unread', 'star', 'unstar', 'trash'"
+    )]
     pub action: String,
     #[schemars(description = "Mailbox/folder the email is currently in (default: 'inbox')")]
     pub folder: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct BulkManageEmailParam {
+    #[schemars(
+        description = "Action to execute: 'mark_read', 'mark_unread', 'star', 'unstar', or 'trash'"
+    )]
+    pub action: String,
+    #[schemars(description = "Mailbox/folder to search (default: 'inbox')")]
+    pub folder: Option<String>,
+    #[schemars(
+        description = "Filter type: 'unread', 'all', 'read', or 'starred' (default: 'unread')"
+    )]
+    pub filter: Option<String>,
+    #[schemars(description = "Optional search text matched against message content")]
+    pub query: Option<String>,
+    #[schemars(description = "Maximum number of messages to affect (default: 30, max: 100)")]
+    pub limit: Option<u32>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -82,10 +108,32 @@ pub struct SendEmailParam {
     pub attachments: Option<Vec<String>>,
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub struct BulkSendEmailParam {
+    #[schemars(description = "Recipient email addresses; maximum 100")]
+    pub to: Vec<String>,
+    #[schemars(description = "Email subject")]
+    pub subject: String,
+    #[schemars(description = "Email body text (plain text or HTML)")]
+    pub body: String,
+    #[schemars(description = "True if body is formatted HTML (default: false)")]
+    pub is_html: Option<bool>,
+    #[schemars(description = "Optional custom sender display name")]
+    pub from_name: Option<String>,
+    #[schemars(description = "Optional local file paths to attach")]
+    pub attachments: Option<Vec<String>>,
+}
+
 impl GmailService {
     fn resolve_credentials() -> Result<(String, String), String> {
-        let mut email = env::var("GMAIL_EMAIL").unwrap_or_default().trim().to_string();
-        let mut app_password = env::var("GMAIL_APP_PASSWORD").unwrap_or_default().trim().to_string();
+        let mut email = env::var("GMAIL_EMAIL")
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        let mut app_password = env::var("GMAIL_APP_PASSWORD")
+            .unwrap_or_default()
+            .trim()
+            .to_string();
 
         if let Ok(home) = env::var("HOME") {
             let path = PathBuf::from(home).join(".config/credentials/workspace-google");
@@ -129,15 +177,16 @@ impl GmailService {
         let client = imap::connect(("imap.gmail.com", 993), "imap.gmail.com", &tls)
             .map_err(|e| format!("IMAP connect failed: {e}"))?;
 
-        let mut session = client
-            .login(email, pass)
-            .map_err(|(e, _)| format!("IMAP authentication failed: {e}. Check your App Password."))?;
+        let mut session = client.login(email, pass).map_err(|(e, _)| {
+            format!("IMAP authentication failed: {e}. Check your App Password.")
+        })?;
 
         let _ = session.logout();
         Ok(())
     }
 
-    fn connect_imap_sync() -> Result<imap::Session<native_tls::TlsStream<std::net::TcpStream>>, String> {
+    fn connect_imap_sync(
+    ) -> Result<imap::Session<native_tls::TlsStream<std::net::TcpStream>>, String> {
         let (email, pass) = Self::resolve_credentials()?;
         let tls = native_tls::TlsConnector::builder()
             .build()
@@ -166,13 +215,18 @@ impl GmailService {
         }
     }
 
-    fn detect_sender_name(session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStream>>, my_email: &str) -> Option<String> {
+    fn detect_sender_name(
+        session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStream>>,
+        my_email: &str,
+    ) -> Option<String> {
         let sent_folders = ["[Gmail]/Sent Mail", "INBOX"];
         for folder in sent_folders {
             if session.select(folder).is_ok() {
                 if let Ok(seqs) = session.search(format!("FROM \"{my_email}\"")) {
                     if let Some(&last_id) = seqs.iter().max() {
-                        if let Ok(msgs) = session.fetch(last_id.to_string(), "(BODY.PEEK[HEADER.FIELDS (FROM)])") {
+                        if let Ok(msgs) =
+                            session.fetch(last_id.to_string(), "(BODY.PEEK[HEADER.FIELDS (FROM)])")
+                        {
                             for m in &msgs {
                                 if let Some(hdr) = m.header() {
                                     if let Ok((headers, _)) = mailparse::parse_headers(hdr) {
@@ -180,7 +234,8 @@ impl GmailService {
                                             if h.get_key().eq_ignore_ascii_case("from") {
                                                 let val = h.get_value();
                                                 if let Some(idx) = val.find('<') {
-                                                    let name = val[..idx].trim().trim_matches('"').trim();
+                                                    let name =
+                                                        val[..idx].trim().trim_matches('"').trim();
                                                     if !name.is_empty() {
                                                         return Some(name.to_string());
                                                     }
@@ -213,27 +268,30 @@ impl GmailService {
             return serde_json::json!({
                 "status": "error",
                 "message": "Invalid email address."
-            }).to_string();
+            })
+            .to_string();
         }
 
         if clean_pwd.is_empty() {
             return serde_json::json!({
                 "status": "error",
                 "message": "App Password cannot be empty."
-            }).to_string();
+            })
+            .to_string();
         }
 
         let em = email.clone();
         let pw = clean_pwd.clone();
-        let test_res = tokio::task::spawn_blocking(move || {
-            Self::test_imap_login(&em, &pw)
-        }).await.unwrap_or_else(|e| Err(e.to_string()));
+        let test_res = tokio::task::spawn_blocking(move || Self::test_imap_login(&em, &pw))
+            .await
+            .unwrap_or_else(|e| Err(e.to_string()));
 
         if let Err(err) = test_res {
             return serde_json::json!({
                 "status": "error",
                 "message": format!("Verification failed: {err}")
-            }).to_string();
+            })
+            .to_string();
         }
 
         let base = if let Ok(home) = env::var("HOME") {
@@ -246,7 +304,8 @@ impl GmailService {
             return serde_json::json!({
                 "status": "error",
                 "message": format!("Failed to create credentials directory: {e}")
-            }).to_string();
+            })
+            .to_string();
         }
 
         let creds_file = creds_dir.join("workspace-google");
@@ -255,14 +314,16 @@ impl GmailService {
             return serde_json::json!({
                 "status": "error",
                 "message": format!("Failed to write credentials file: {e}")
-            }).to_string();
+            })
+            .to_string();
         }
 
         serde_json::json!({
             "status": "success",
             "message": format!("Gmail credentials successfully verified and saved for {email}!"),
             "path": creds_file.display().to_string()
-        }).to_string()
+        })
+        .to_string()
     }
 
     #[tool(
@@ -366,7 +427,10 @@ impl GmailService {
         .unwrap_or_else(|e| format!("{{\"error\": \"Task join error: {e}\"}}"))
     }
 
-    #[tool(name = "gmail_read_email", description = "Read complete content, attachments metadata, and body of an email by permanent UID")]
+    #[tool(
+        name = "gmail_read_email",
+        description = "Read complete content, attachments metadata, and body of an email by permanent UID"
+    )]
     pub async fn read_email(&self, #[tool(aggr)] param: ReadEmailParam) -> String {
         tokio::task::spawn_blocking(move || {
             let mut session = match Self::connect_imap_sync() {
@@ -458,7 +522,10 @@ impl GmailService {
         .unwrap_or_else(|e| format!("{{\"error\": \"Task join error: {e}\"}}"))
     }
 
-    #[tool(name = "gmail_manage_email", description = "Manage an email: mark read/unread, star/unstar, or move to trash by permanent UID")]
+    #[tool(
+        name = "gmail_manage_email",
+        description = "Manage an email: mark read/unread, star/unstar, or move to trash by permanent UID"
+    )]
     pub async fn manage_email(&self, #[tool(aggr)] param: ManageEmailParam) -> String {
         tokio::task::spawn_blocking(move || {
             let mut session = match Self::connect_imap_sync() {
@@ -506,7 +573,64 @@ impl GmailService {
         .unwrap_or_else(|e| format!("{{\"error\": \"Task join error: {e}\"}}"))
     }
 
-    #[tool(name = "gmail_reply_email", description = "Reply to an existing email thread using UID (automatically sets In-Reply-To, References, and Re: Subject)")]
+    #[tool(
+        name = "gmail_bulk_manage",
+        description = "Apply one safe Gmail action to multiple messages selected by folder, filter, and search query"
+    )]
+    pub async fn bulk_manage_email(&self, #[tool(aggr)] param: BulkManageEmailParam) -> String {
+        tokio::task::spawn_blocking(move || {
+            let mut session = match Self::connect_imap_sync() {
+                Ok(s) => s,
+                Err(e) => return serde_json::json!({"error": e}).to_string(),
+            };
+            let mailbox = Self::resolve_mailbox_name(param.folder.as_deref());
+            if let Err(e) = session.select(mailbox) {
+                return serde_json::json!({"error": format!("Failed to select mailbox '{mailbox}': {e}")}).to_string();
+            }
+            let filter = param.filter.unwrap_or_else(|| "unread".into());
+            let base_query = match filter.to_lowercase().as_str() {
+                "all" => "ALL",
+                "read" | "seen" => "SEEN",
+                "starred" | "flagged" => "FLAGGED",
+                _ => "UNSEEN",
+            };
+            let search_query = match param.query.as_deref().map(str::trim).filter(|q| !q.is_empty()) {
+                Some(query) => format!("{base_query} TEXT \"{query}\""),
+                None => base_query.to_string(),
+            };
+            let mut uids: Vec<u32> = match session.uid_search(&search_query) {
+                Ok(uids) => uids.into_iter().collect(),
+                Err(e) => return serde_json::json!({"error": format!("Failed to search emails: {e}")}).to_string(),
+            };
+            uids.sort_unstable_by(|a, b| b.cmp(a));
+            uids.truncate(param.limit.unwrap_or(30).clamp(1, 100) as usize);
+            let action = param.action.to_lowercase();
+            let uid_set = uids.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
+            let result = match action.as_str() {
+                "mark_read" | "read" => session.uid_store(&uid_set, "+FLAGS (\\Seen)"),
+                "mark_unread" | "unread" => session.uid_store(&uid_set, "-FLAGS (\\Seen)"),
+                "star" => session.uid_store(&uid_set, "+FLAGS (\\Flagged)"),
+                "unstar" => session.uid_store(&uid_set, "-FLAGS (\\Flagged)"),
+                "trash" | "delete" => {
+                    if let Err(e) = session.uid_copy(&uid_set, "[Gmail]/Trash") {
+                        return serde_json::json!({"error": format!("Failed to copy messages to Trash: {e}")}).to_string();
+                    }
+                    session.uid_store(&uid_set, "+FLAGS (\\Deleted)")
+                }
+                _ => return serde_json::json!({"error": "Unknown action. Valid: mark_read, mark_unread, star, unstar, trash"}).to_string(),
+            };
+            let _ = session.logout();
+            match result {
+                Ok(_) => serde_json::json!({"status": "success", "action": action, "mailbox": mailbox, "affected": uids.len(), "uids": uids}).to_string(),
+                Err(e) => serde_json::json!({"error": format!("Failed to execute action: {e}")}).to_string(),
+            }
+        }).await.unwrap_or_else(|e| serde_json::json!({"error": format!("Task join error: {e}")}).to_string())
+    }
+
+    #[tool(
+        name = "gmail_reply_email",
+        description = "Reply to an existing email thread using UID (automatically sets In-Reply-To, References, and Re: Subject)"
+    )]
     pub async fn reply_email(&self, #[tool(aggr)] param: ReplyEmailParam) -> String {
         let (my_email, pass) = match Self::resolve_credentials() {
             Ok(c) => c,
@@ -524,7 +648,11 @@ impl GmailService {
             if let Err(e) = session.select(mailbox) {
                 return Err(format!("Failed to select mailbox: {e}"));
             }
-            let msgs = session.uid_fetch(uid.to_string(), "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT MESSAGE-ID REFERENCES)])")
+            let msgs = session
+                .uid_fetch(
+                    uid.to_string(),
+                    "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT MESSAGE-ID REFERENCES)])",
+                )
                 .map_err(|e| format!("Fetch failed: {e}"))?;
 
             let mut from = String::new();
@@ -549,7 +677,9 @@ impl GmailService {
             }
             let _ = session.logout();
             Ok((from, subject, message_id, references))
-        }).await.unwrap_or_else(|e| Err(e.to_string()));
+        })
+        .await
+        .unwrap_or_else(|e| Err(e.to_string()));
 
         let (orig_from, orig_subject, orig_msg_id, orig_refs) = match orig_meta {
             Ok(meta) => meta,
@@ -562,7 +692,10 @@ impl GmailService {
 
         // Reply To address extraction
         let reply_to = if let Some(idx) = orig_from.find('<') {
-            orig_from[idx+1..].trim_end_matches('>').trim().to_string()
+            orig_from[idx + 1..]
+                .trim_end_matches('>')
+                .trim()
+                .to_string()
         } else {
             orig_from.trim().to_string()
         };
@@ -602,13 +735,19 @@ impl GmailService {
             })
             .to(match reply_to.parse() {
                 Ok(t) => t,
-                Err(e) => return format!("{{\"error\": \"Invalid recipient address '{reply_to}': {e}\"}}"),
+                Err(e) => {
+                    return format!(
+                        "{{\"error\": \"Invalid recipient address '{reply_to}': {e}\"}}"
+                    )
+                }
             })
             .subject(&reply_subject)
             .header(ContentType::TEXT_PLAIN);
 
         if !orig_msg_id.is_empty() {
-            builder = builder.header(lettre::message::header::InReplyTo::from(orig_msg_id.clone()));
+            builder = builder.header(lettre::message::header::InReplyTo::from(
+                orig_msg_id.clone(),
+            ));
             let new_refs = if orig_refs.is_empty() {
                 orig_msg_id
             } else {
@@ -643,7 +782,86 @@ impl GmailService {
         }
     }
 
-    #[tool(name = "gmail_send_email", description = "Send an email via Gmail SMTP (supports text or HTML)")]
+    #[tool(
+        name = "gmail_bulk_send",
+        description = "Send the same plain-text or HTML email to multiple recipients, up to 100"
+    )]
+    pub async fn bulk_send_email(&self, #[tool(aggr)] param: BulkSendEmailParam) -> String {
+        let (my_email, pass) = match Self::resolve_credentials() {
+            Ok(c) => c,
+            Err(e) => return serde_json::json!({"error": e}).to_string(),
+        };
+        let recipients: Vec<String> = param
+            .to
+            .into_iter()
+            .map(|address| address.trim().to_string())
+            .filter(|address| !address.is_empty())
+            .collect();
+        if recipients.is_empty() || recipients.len() > 100 {
+            return serde_json::json!({"error": "Recipients must contain between 1 and 100 non-empty addresses."}).to_string();
+        }
+        if param
+            .attachments
+            .as_ref()
+            .is_some_and(|files| !files.is_empty())
+        {
+            return serde_json::json!({"error": "Attachments are not supported by gmail_bulk_send; use gmail_send_email for attachments."}).to_string();
+        }
+        let from_header = match param.from_name {
+            Some(name) if !name.trim().is_empty() => format!("{} <{}>", name.trim(), my_email),
+            _ => my_email.clone(),
+        };
+        let content_type = if param.is_html.unwrap_or(false) {
+            ContentType::TEXT_HTML
+        } else {
+            ContentType::TEXT_PLAIN
+        };
+        let mailer = match AsyncSmtpTransport::<Tokio1Executor>::relay("smtp.gmail.com") {
+            Ok(builder) => builder
+                .credentials(Credentials::new(my_email, pass))
+                .build(),
+            Err(e) => {
+                return serde_json::json!({"error": format!("Failed to configure SMTP: {e}")})
+                    .to_string()
+            }
+        };
+        let mut sent = Vec::new();
+        let mut failed = Vec::new();
+        for recipient in recipients {
+            let email = match Message::builder()
+                .from(match from_header.parse() {
+                    Ok(value) => value,
+                    Err(e) => return serde_json::json!({"error": format!("Invalid sender address: {e}")}).to_string(),
+                })
+                .to(match recipient.parse() {
+                    Ok(value) => value,
+                    Err(e) => {
+                        failed.push(serde_json::json!({"to": recipient, "error": format!("Invalid recipient address: {e}")}));
+                        continue;
+                    }
+                })
+                .subject(&param.subject)
+                .header(content_type.clone())
+                .body(param.body.clone())
+            {
+                Ok(email) => email,
+                Err(e) => {
+                    failed.push(serde_json::json!({"to": recipient, "error": format!("Failed to build email: {e}")}));
+                    continue;
+                }
+            };
+            match mailer.send(email).await {
+                Ok(_) => sent.push(recipient),
+                Err(e) => failed.push(serde_json::json!({"to": recipient, "error": e.to_string()})),
+            }
+        }
+        serde_json::json!({"status": "completed", "subject": param.subject, "sent": sent, "failed": failed}).to_string()
+    }
+
+    #[tool(
+        name = "gmail_send_email",
+        description = "Send an email via Gmail SMTP (supports text or HTML)"
+    )]
     pub async fn send_email(&self, #[tool(aggr)] param: SendEmailParam) -> String {
         let (my_email, pass) = match Self::resolve_credentials() {
             Ok(c) => c,
@@ -685,15 +903,23 @@ impl GmailService {
             let path = PathBuf::from(&attachment_path);
             let filename = match path.file_name().and_then(|name| name.to_str()) {
                 Some(name) if !name.is_empty() => name.to_string(),
-                _ => return format!("{{\"error\": \"Invalid attachment path: {attachment_path}\"}}"),
+                _ => {
+                    return format!("{{\"error\": \"Invalid attachment path: {attachment_path}\"}}")
+                }
             };
             let bytes = match fs::read(&path) {
                 Ok(bytes) => bytes,
-                Err(e) => return format!("{{\"error\": \"Failed to read attachment '{attachment_path}': {e}\"}}"),
+                Err(e) => {
+                    return format!(
+                        "{{\"error\": \"Failed to read attachment '{attachment_path}': {e}\"}}"
+                    )
+                }
             };
             let content_type = match ContentType::parse(mime_type_for_path(&path)) {
                 Ok(content_type) => content_type,
-                Err(e) => return format!("{{\"error\": \"Invalid attachment MIME type for '{attachment_path}': {e}\"}}"),
+                Err(e) => return format!(
+                    "{{\"error\": \"Invalid attachment MIME type for '{attachment_path}': {e}\"}}"
+                ),
             };
             multipart = multipart.singlepart(Attachment::new(filename).body(bytes, content_type));
         }
@@ -736,7 +962,13 @@ impl GmailService {
 }
 
 fn mime_type_for_path(path: &std::path::Path) -> &'static str {
-    match path.extension().and_then(|ext| ext.to_str()).unwrap_or_default().to_ascii_lowercase().as_str() {
+    match path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "pdf" => "application/pdf",
         "png" => "image/png",
         "jpg" | "jpeg" => "image/jpeg",
@@ -755,7 +987,9 @@ impl ServerHandler for GmailService {
                 version: "0.2.0".into(),
             },
             capabilities: ServerCapabilities::builder().enable_tools().build(),
-            instructions: Some("SMCP Gmail server for checking, reading, managing, and sending emails.".into()),
+            instructions: Some(
+                "SMCP Gmail server for checking, reading, managing, and sending emails.".into(),
+            ),
             ..Default::default()
         }
     }
