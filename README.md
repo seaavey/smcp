@@ -30,6 +30,12 @@ smcp call gmail-reply 5301 --body "Thank you, verified!"
 # Manage emails (trash, mark_read, mark_unread, star, unstar)
 smcp call gmail-manage 5301 trash
 
+# Bulk-manage up to 100 matching messages; trash remains reversible
+smcp call gmail-bulk-manage trash --folder inbox --filter all --query newsletter --limit 50
+
+# Send one message to multiple recipients (repeat --to, maximum 100)
+smcp call gmail-bulk-send --to one@example.com --to two@example.com --subject "Update" --body "Hello"
+
 # Send an email with an optional local attachment
 smcp call gmail-send --to someone@example.com --subject "Subject" --body "See attached file" --attachment /path/to/file.pdf
 
@@ -58,6 +64,8 @@ Native Rust IMAP/SMTP client supporting full mailbox traversal (`INBOX`, `[Gmail
 - `gmail_read_email`: Read complete content, attachment metadata (`filename`, `content_type`, `size`), sender/receiver headers, and body by `uid`.
 - `gmail_reply_email`: Reply to an existing email thread using `uid` (automatically extracts sender, injects `In-Reply-To`, `References`, and `Re:` subject).
 - `gmail_manage_email`: Execute inbox triage actions (`mark_read`, `mark_unread`, `star`, `unstar`, `trash`) by `uid`.
+- `gmail_bulk_manage`: Apply one triage action to up to 100 messages selected by folder, filter, and text query; returns affected UIDs.
+- `gmail_bulk_send`: Send one plain-text or HTML message to up to 100 recipients with per-recipient results.
 - `gmail_send_email`: Send emails via Gmail SMTP relay (supports plain text, HTML, and local file attachments).
 
 ---
