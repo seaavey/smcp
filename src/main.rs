@@ -165,7 +165,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             folder,
             query,
         }) => {
-            let svc = GmailService::default();
+            let svc = GmailService;
             let res = svc
                 .check_emails(servers::workspace::gmail::CheckEmailsParam {
                     limit: Some(limit),
@@ -177,7 +177,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("{res}");
         }
         Commands::Call(CallCommands::GmailRead { uid, folder }) => {
-            let svc = GmailService::default();
+            let svc = GmailService;
             let res = svc
                 .read_email(servers::workspace::gmail::ReadEmailParam {
                     uid,
@@ -192,7 +192,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             folder,
             from_name,
         }) => {
-            let svc = GmailService::default();
+            let svc = GmailService;
             let res = svc
                 .reply_email(servers::workspace::gmail::ReplyEmailParam {
                     uid,
@@ -208,7 +208,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             action,
             folder,
         }) => {
-            let svc = GmailService::default();
+            let svc = GmailService;
             let res = svc
                 .manage_email(servers::workspace::gmail::ManageEmailParam {
                     uid,
@@ -225,7 +225,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             query,
             limit,
         }) => {
-            let svc = GmailService::default();
+            let svc = GmailService;
             let res = svc
                 .bulk_manage_email(servers::workspace::gmail::BulkManageEmailParam {
                     action,
@@ -244,7 +244,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             is_html,
             from_name,
         }) => {
-            let svc = GmailService::default();
+            let svc = GmailService;
             let res = svc
                 .bulk_send_email(servers::workspace::gmail::BulkSendEmailParam {
                     to,
@@ -265,7 +265,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             from_name,
             attachments,
         }) => {
-            let svc = GmailService::default();
+            let svc = GmailService;
             let res = svc
                 .send_email(servers::workspace::gmail::SendEmailParam {
                     to,
@@ -319,7 +319,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             running.waiting().await?;
         }
         Commands::Workspace(WorkspaceCommands::Gmail) => {
-            let server = GmailService::default();
+            let server = GmailService;
             let transport = stdio();
             let running = server.serve(transport).await?;
             running.waiting().await?;

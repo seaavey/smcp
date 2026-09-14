@@ -9,9 +9,7 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Default)]
 pub struct GmailService;
 
-#[path = "gmail_models.rs"]
 mod models;
-#[path = "gmail_tools.rs"]
 mod tools;
 pub use models::*;
 impl GmailService {
